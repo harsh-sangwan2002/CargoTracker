@@ -1,119 +1,67 @@
-import { 
-  collection, 
-  addDoc, 
-  getDocs, 
-  doc, 
-  updateDoc, 
-  deleteDoc, 
-  query, 
-  orderBy,
+import {
+  collection,
+  addDoc,
+  getDocs,
+  updateDoc,
+  deleteDoc,
+  doc,
   serverTimestamp,
-  Timestamp 
+  query,
+  orderBy,
 } from 'firebase/firestore';
-import { getFirestore } from 'firebase/firestore';
-import { app } from '../firebaseConfig';
-
-// Initialize Firestore
-const db = getFirestore(app);
-
-// Collection name
-const TRIPS_COLLECTION = 'trips';
+import { db } from '../firebaseConfig';
 
 export interface TripFirestore {
   truck: string;
-  status: string;
-  time: string;
-  bidNo: string;              // This is the LR No
-  quantity: string;
-  departureTime: Date;
-  arrivalTime: Date | null;
-  fuelFilled: string;
-  createdAt: Date;
-  userId?: string;
+  bidNo: string;
   driverName: string;
-  fromPlant: string;
-  toPlant: string;
   companyName: string;
   itemType: string;
+  quantity: string;
+  fuelFilled: string;
+  departureTime: Date;
+  arrivalTime: Date | null;
+  fromPlant: string;
+  toPlant: string;
+  status: string;
+  time: string;
+  userId?: string;
+  createdAt: any;
 }
 
-// Helper to convert Firestore Timestamp → Date
-const timestampToDate = (ts: Timestamp | Date | null): Date | null => {
-  if (!ts) return null;
-  if (ts instanceof Date) return ts;
-  return ts.toDate();
+const tripsRef = collection(db, 'trips');
+
+export const addTrip = async (trip: Omit<TripFirestore, 'createdAt'>) => {
+  await addDoc(tripsRef, {
+    ...trip,
+    createdAt: serverTimestamp(),
+  });
 };
 
-// Get all trips (newest first)
-export const getTrips = async (userId?: string): Promise<(TripFirestore & { id: string })[]> => {
-  try {
-    const q = query(
-      collection(db, TRIPS_COLLECTION),
-      orderBy('createdAt', 'desc')
-    );
+export const getTrips = async () => {
+  const q = query(tripsRef, orderBy('createdAt', 'desc'));
+  const snapshot = await getDocs(q);
 
-    const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => {
-      const data = doc.data();
-      return {
-        id: doc.id,
-        truck: data.truck || '',
-        status: data.status || '',
-        time: data.time || '',
-        bidNo: data.bidNo || '',
-        quantity: data.quantity || '',
-        departureTime: timestampToDate(data.departureTime) || new Date(),
-        arrivalTime: timestampToDate(data.arrivalTime),
-        fuelFilled: data.fuelFilled || '',
-        createdAt: timestampToDate(data.createdAt) || new Date(),
-        userId: data.userId || '',
-        driverName: data.driverName || '',
-        fromPlant: data.fromPlant || '',
-        toPlant: data.toPlant || '',
-        companyName: data.companyName || '',
-        itemType: data.itemType || '',
-      };
-    });
-  } catch (error) {
-    console.error("Error getting trips:", error);
-    return [];
-  }
+  return snapshot.docs.map(docSnap => {
+    const data = docSnap.data();
+    return {
+      id: docSnap.id,
+      ...data,
+      departureTime: data.departureTime?.toDate(),
+      arrivalTime: data.arrivalTime?.toDate() || null,
+    };
+  }) as (TripFirestore & { id: string })[];
 };
 
-// Add new trip
-export const addTrip = async (tripData: Omit<TripFirestore, 'createdAt'>) => {
-  try {
-    const docRef = await addDoc(collection(db, TRIPS_COLLECTION), {
-      ...tripData,
-      createdAt: serverTimestamp(),
-    });
-    return docRef.id;
-  } catch (error) {
-    console.error("Error adding trip:", error);
-    throw error;
-  }
+export const updateTrip = async (
+  id: string,
+  data: Partial<TripFirestore>
+) => {
+  const ref = doc(db, 'trips', id);
+  await updateDoc(ref, data);
 };
 
-// Update trip
-export const updateTrip = async (tripId: string, tripData: Partial<TripFirestore>) => {
-  try {
-    const tripRef = doc(db, TRIPS_COLLECTION, tripId);
-    await updateDoc(tripRef, {
-      ...tripData,
-    });
-  } catch (error) {
-    console.error("Error updating trip:", error);
-    throw error;
-  }
-};
-
-// Delete trip
-export const deleteTrip = async (tripId: string) => {
-  try {
-    const tripRef = doc(db, TRIPS_COLLECTION, tripId);
-    await deleteDoc(tripRef);
-  } catch (error) {
-    console.error("Error deleting trip:", error);
-    throw error;
-  }
+export const deleteTrip = async (id: string) => {
+  const ref = doc(db, 'trips', id);
+  await deleteDoc(ref);
 };

@@ -17,7 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { auth } from '../firebaseConfig';
 import { signOut } from 'firebase/auth';
 import { useNavigation } from '@react-navigation/native';
-import { getTrips, addTrip, TripFirestore } from '../services/tripService';
+import { getTrips, addTrip, TripFirestore, updateTrip, deleteTrip } from '../services/tripService';
 
 export default function DashboardScreen() {
     const navigation = useNavigation<any>();
@@ -50,6 +50,24 @@ export default function DashboardScreen() {
     // Trips state
     const [trips, setTrips] = useState<(TripFirestore & { id: string })[]>([]);
     const [loading, setLoading] = useState(true);
+
+    // View/Edit Modal state
+    const [viewModalVisible, setViewModalVisible] = useState(false);
+    const [selectedTrip, setSelectedTrip] = useState<(TripFirestore & { id: string }) | null>(null);
+    const [isEditing, setIsEditing] = useState(false);
+
+    // Edit form states
+    const [editVehicleNo, setEditVehicleNo] = useState('');
+    const [editLrNo, setEditLrNo] = useState('');
+    const [editDriverName, setEditDriverName] = useState('');
+    const [editCompanyName, setEditCompanyName] = useState('');
+    const [editItemType, setEditItemType] = useState('');
+    const [editQuantity, setEditQuantity] = useState('');
+    const [editFuelFilled, setEditFuelFilled] = useState('');
+    const [editDepartureTime, setEditDepartureTime] = useState<Date | null>(null);
+    const [editArrivalTime, setEditArrivalTime] = useState<Date | null>(null);
+    const [editFromPlant, setEditFromPlant] = useState('');
+    const [editToPlant, setEditToPlant] = useState('');
 
     // Load trips from Firebase on mount
     useEffect(() => {
@@ -198,6 +216,97 @@ export default function DashboardScreen() {
             console.error('Error adding trip:', error);
             Alert.alert('Error', 'Failed to add trip. Please try again.');
         }
+    };
+
+    const handleTripPress = (trip: TripFirestore & { id: string }) => {
+        setSelectedTrip(trip);
+        setViewModalVisible(true);
+        setIsEditing(false);
+    };
+
+    const handleEditPress = () => {
+        if (selectedTrip) {
+            setEditVehicleNo(selectedTrip.truck);
+            setEditLrNo(selectedTrip.bidNo);
+            setEditDriverName(selectedTrip.driverName);
+            setEditCompanyName(selectedTrip.companyName);
+            setEditItemType(selectedTrip.itemType);
+            setEditQuantity(selectedTrip.quantity);
+            setEditFuelFilled(selectedTrip.fuelFilled);
+            setEditDepartureTime(selectedTrip.departureTime);
+            setEditArrivalTime(selectedTrip.arrivalTime);
+            setEditFromPlant(selectedTrip.fromPlant);
+            setEditToPlant(selectedTrip.toPlant);
+            setIsEditing(true);
+        }
+    };
+
+    const handleSaveEdit = async () => {
+        if (!selectedTrip || !editVehicleNo || !editLrNo || !editDriverName || !editCompanyName ||
+            !editItemType || !editQuantity || !editDepartureTime || !editFromPlant || !editToPlant) {
+            Alert.alert('Error', 'Please fill all required fields');
+            return;
+        }
+
+        try {
+            const updatedData: Partial<TripFirestore> = {
+                truck: editVehicleNo.toUpperCase(),
+                bidNo: editLrNo,
+                driverName: editDriverName,
+                companyName: editCompanyName,
+                itemType: editItemType,
+                quantity: editQuantity,
+                fuelFilled: editFuelFilled || '0',
+                departureTime: editDepartureTime,
+                arrivalTime: editArrivalTime,
+                fromPlant: editFromPlant,
+                toPlant: editToPlant,
+                status: `${editFromPlant} → ${editToPlant}${editArrivalTime ? ' (Delivered)' : ' (En route)'}`,
+            };
+
+            await updateTrip(selectedTrip.id, updatedData);
+
+            Alert.alert('Success ✓', 'Trip updated successfully');
+            setIsEditing(false);
+            setViewModalVisible(false);
+            await loadTrips();
+        } catch (error) {
+            console.error('Error updating trip:', error);
+            Alert.alert('Error', 'Failed to update trip. Please try again.');
+        }
+    };
+
+    const handleDeleteTrip = () => {
+        if (!selectedTrip) return;
+
+        Alert.alert(
+            'Delete Trip',
+            'Are you sure you want to delete this trip?',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Delete',
+                    style: 'destructive',
+                    onPress: async () => {
+                        try {
+                            await deleteTrip(selectedTrip.id);
+                            Alert.alert('Success ✓', 'Trip deleted successfully');
+                            setViewModalVisible(false);
+                            await loadTrips();
+                        } catch (error) {
+                            console.error('Error deleting trip:', error);
+                            Alert.alert('Error', 'Failed to delete trip. Please try again.');
+                        }
+                    },
+                },
+            ]
+        );
+    };
+
+    const handleViewModalClose = () => {
+        setViewModalVisible(false);
+        setIsEditing(false);
+        setSelectedTrip(null);
     };
 
     const resetForm = () => {
@@ -500,6 +609,7 @@ export default function DashboardScreen() {
                     </View>
                 </KeyboardAvoidingView>
             </Modal>
+
         </SafeAreaView>
     );
 }
@@ -761,5 +871,69 @@ const styles = StyleSheet.create({
     dateTextSelected: {
         color: '#111827',
         fontWeight: '500',
+    },
+    viewModalScrollContent: {
+        flexGrow: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingVertical: 40,
+    },
+    viewModalContent: {
+        backgroundColor: '#fff',
+        width: '90%',
+        maxHeight: '90%',
+        borderRadius: 16,
+        padding: 24,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.25,
+        shadowRadius: 20,
+        elevation: 10,
+    },
+    detailRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        paddingVertical: 12,
+        borderBottomWidth: 1,
+        borderBottomColor: '#e5e7eb',
+    },
+    detailLabel: {
+        fontSize: 15,
+        fontWeight: '600',
+        color: '#374151',
+        flex: 1,
+    },
+    detailValue: {
+        fontSize: 15,
+        color: '#111827',
+        flex: 1,
+        textAlign: 'right',
+    },
+    viewModalButtons: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        marginTop: 20,
+        marginBottom: 10,
+    },
+    editButtonStyle: {
+        backgroundColor: '#1d4ed8',
+    },
+    editButtonText: {
+        color: '#fff',
+        fontWeight: 'bold',
+    },
+    deleteButtonStyle: {
+        backgroundColor: '#ef4444',
+    },
+    deleteButtonText: {
+        color: '#fff',
+        fontWeight: 'bold',
+    },
+    closeButton: {
+        width: '100%',
+        backgroundColor: '#e5e7eb',
+        paddingVertical: 14,
+        borderRadius: 8,
+        alignItems: 'center',
     },
 });
