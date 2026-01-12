@@ -18,6 +18,7 @@ import { auth } from '../firebaseConfig';
 import { signOut } from 'firebase/auth';
 import { useNavigation } from '@react-navigation/native';
 import { getTrips, addTrip, TripFirestore, updateTrip, deleteTrip } from '../services/tripService';
+import { isManager } from '../services/userService';
 
 export default function DashboardScreen() {
     const navigation = useNavigation<any>();
@@ -25,6 +26,8 @@ export default function DashboardScreen() {
 
     // Add trip modal
     const [addModalVisible, setAddModalVisible] = useState(false);
+    const [isUserManager, setIsUserManager] = useState(false);
+    const [checkingRole, setCheckingRole] = useState(true);
 
     // Add trip form states
     const [vehicleNo, setVehicleNo] = useState('');
@@ -104,7 +107,21 @@ export default function DashboardScreen() {
 
     useEffect(() => {
         loadTrips();
+        checkUserRole();
     }, []);
+
+    const checkUserRole = async () => {
+        try {
+            if (user?.uid) {
+                const manager = await isManager(user.uid);
+                setIsUserManager(manager);
+            }
+        } catch (error) {
+            console.error('Error checking user role:', error);
+        } finally {
+            setCheckingRole(false);
+        }
+    };
 
     const loadTrips = async () => {
         try {
@@ -312,6 +329,25 @@ export default function DashboardScreen() {
                         <Text style={styles.logoutText}>Logout</Text>
                     </TouchableOpacity>
                 </View>
+
+                {/* Manager Section - Driver Management */}
+                {isUserManager && !checkingRole && (
+                    <View style={styles.managerButtonsContainer}>
+                        <TouchableOpacity 
+                            style={styles.adminButton}
+                            onPress={() => navigation.navigate('DriverManagement')}
+                        >
+                            <Text style={styles.adminButtonText}>👥 Manage Drivers</Text>
+                        </TouchableOpacity>
+                        
+                        <TouchableOpacity 
+                            style={styles.addDriverButton}
+                            onPress={() => navigation.navigate('DriverManagement')}
+                        >
+                            <Text style={styles.addDriverButtonText}>➕ Add Driver</Text>
+                        </TouchableOpacity>
+                    </View>
+                )}
 
                 {/* Stats */}
                 <View style={styles.statsGrid}>
@@ -925,13 +961,13 @@ export default function DashboardScreen() {
                                     <View style={styles.detailRow}>
                                         <Text style={styles.detailLabel}>Departure:</Text>
                                         <Text style={styles.detailValue}>
-                                            {formatDateTime(selectedTrip?.departureTime)}
+                                            {formatDateTime(selectedTrip?.departureTime || null)}
                                         </Text>
                                     </View>
                                     <View style={styles.detailRow}>
                                         <Text style={styles.detailLabel}>Arrival:</Text>
                                         <Text style={styles.detailValue}>
-                                            {formatDateTime(selectedTrip?.arrivalTime) || 'Not arrived'}
+                                            {formatDateTime(selectedTrip?.arrivalTime || null) || 'Not arrived'}
                                         </Text>
                                     </View>
                                     <View style={styles.detailRow}>
@@ -976,15 +1012,15 @@ export default function DashboardScreen() {
 /* ────────────────────────────────────────────────────────────── */
 /* Styles (updated & cleaned) */
 const styles = {
-    container: { flex: 1, backgroundColor: '#f3f4f6' },
-    scrollContent: { padding: 20, paddingBottom: 100 },
+    container: { flex: 1, backgroundColor: '#f3f4f6' } as const,
+    scrollContent: { padding: 20, paddingBottom: 100 } as const,
     header: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
+        flexDirection: 'row' as const,
+        justifyContent: 'space-between' as const,
+        alignItems: 'center' as const,
         marginBottom: 24,
     },
-    welcomeText: { fontSize: 28, fontWeight: 'bold', color: '#111827' },
+    welcomeText: { fontSize: 28, fontWeight: '700' as const, color: '#111827' },
     emailText: { fontSize: 16, color: '#6b7280', marginTop: 4 },
     logoutButton: {
         backgroundColor: '#ef4444',
@@ -992,17 +1028,17 @@ const styles = {
         paddingVertical: 10,
         borderRadius: 8,
     },
-    logoutText: { color: '#fff', fontWeight: '600' },
+    logoutText: { color: '#fff', fontWeight: '600' as const },
 
     statsGrid: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        justifyContent: 'space-between',
+        flexDirection: 'row' as const,
+        flexWrap: 'wrap' as const,
+        justifyContent: 'space-between' as const,
         marginBottom: 32,
     },
     statCard: {
         backgroundColor: '#fff',
-        width: '48%',
+        width: '48%' as const,
         padding: 20,
         borderRadius: 12,
         marginBottom: 16,
@@ -1012,12 +1048,12 @@ const styles = {
         shadowRadius: 8,
         elevation: 3,
     },
-    statValue: { fontSize: 36, fontWeight: 'bold' },
+    statValue: { fontSize: 36, fontWeight: '700' as const },
     statTitle: { fontSize: 14, color: '#6b7280', marginTop: 8 },
 
     sectionTitle: {
         fontSize: 20,
-        fontWeight: '600',
+        fontWeight: '600' as const,
         color: '#111827',
         marginBottom: 16,
     },
@@ -1031,12 +1067,17 @@ const styles = {
         shadowRadius: 8,
         elevation: 3,
     },
+    managerButtonsContainer: {
+        flexDirection: 'row' as const,
+        gap: 12,
+        marginBottom: 20,
+    },
     adminButton: {
+        flex: 1,
         backgroundColor: '#10b981',
         borderRadius: 10,
         paddingVertical: 14,
-        alignItems: 'center',
-        marginBottom: 20,
+        alignItems: 'center' as const,
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.1,
@@ -1045,17 +1086,34 @@ const styles = {
     },
     adminButtonText: {
         color: '#fff',
-        fontSize: 16,
-        fontWeight: 'bold',
+        fontSize: 14,
+        fontWeight: '700' as const,
+    },
+    addDriverButton: {
+        flex: 1,
+        backgroundColor: '#3b82f6',
+        borderRadius: 10,
+        paddingVertical: 14,
+        alignItems: 'center' as const,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 3,
+    },
+    addDriverButtonText: {
+        color: '#fff',
+        fontSize: 14,
+        fontWeight: '700' as const,
     },
     activityItem: {
-        flexDirection: 'row',
+        flexDirection: 'row' as const,
         paddingVertical: 14,
         borderBottomWidth: 1,
         borderBottomColor: '#e5e7eb',
     },
     inputWithSuggestions: {
-        position: 'relative', // important for absolute positioning of suggestions
+        position: 'relative' as const,
     },
     activityDot: {
         width: 10,
@@ -1063,20 +1121,20 @@ const styles = {
         borderRadius: 5,
         backgroundColor: '#1d4ed8',
         marginRight: 14,
-        marginTop: 10, // align better with first line
+        marginTop: 10,
     },
     activityContent: {
         flex: 1,
     },
     tripHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
+        flexDirection: 'row' as const,
+        justifyContent: 'space-between' as const,
+        alignItems: 'center' as const,
         marginBottom: 4,
     },
     suggestionsContainer: {
-        position: 'absolute',
-        top: 52,                    // below input + label (~52px total height)
+        position: 'absolute' as const,
+        top: 52,
         left: 0,
         right: 0,
         zIndex: 100,
@@ -1106,20 +1164,20 @@ const styles = {
     },
     tripMainText: {
         fontSize: 16,
-        fontWeight: '600',
+        fontWeight: '600' as const,
         color: '#111827',
         marginBottom: 4,
     },
     driverName: {
         fontSize: 15,
-        fontWeight: '500',
-        color: '#4b5563', // slightly lighter gray
+        fontWeight: '500' as const,
+        color: '#4b5563',
     },
-    truckName: { fontSize: 16, fontWeight: '600', color: '#111827', flex: 1 },
+    truckName: { fontSize: 16, fontWeight: '600' as const, color: '#111827', flex: 1 },
     routeText: {
         fontSize: 14,
         color: '#1d4ed8',
-        fontWeight: '500',
+        fontWeight: '500' as const,
         marginBottom: 4,
     },
     timeText: {
@@ -1128,41 +1186,41 @@ const styles = {
     },
     statusText: { fontSize: 13, color: '#6b7280' },
     fab: {
-        position: 'absolute',
+        position: 'absolute' as const,
         right: 20,
         bottom: 30,
         backgroundColor: '#1d4ed8',
         width: 60,
         height: 60,
         borderRadius: 30,
-        justifyContent: 'center',
-        alignItems: 'center',
+        justifyContent: 'center' as const,
+        alignItems: 'center' as const,
         elevation: 8,
     },
-    fabText: { color: '#fff', fontSize: 32, fontWeight: '300' },
+    fabText: { color: '#fff', fontSize: 32, fontWeight: '300' as const },
     modalOverlay: {
         flex: 1,
         backgroundColor: 'rgba(0,0,0,0.5)',
-        justifyContent: 'center',
-        alignItems: 'center',
+        justifyContent: 'center' as const,
+        alignItems: 'center' as const,
     },
     modalContentWide: {
         backgroundColor: '#fff',
-        width: '92%',
-        maxHeight: '88%',
+        width: '92%' as const,
+        maxHeight: '88%' as const,
         borderRadius: 16,
         padding: 20,
     },
     modalTitle: {
         fontSize: 22,
-        fontWeight: 'bold',
+        fontWeight: '700' as const,
         color: '#111827',
-        textAlign: 'center',
+        textAlign: 'center' as const,
         marginBottom: 16,
     },
     twoColumnRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
+        flexDirection: 'row' as const,
+        justifyContent: 'space-between' as const,
         marginBottom: 14,
     },
     halfInput: {
@@ -1185,7 +1243,7 @@ const styles = {
         paddingVertical: 14,
         backgroundColor: '#f9fafb',
         marginHorizontal: 4,
-        justifyContent: 'center',
+        justifyContent: 'center' as const,
     },
     modalInput: {
         borderWidth: 1,
@@ -1198,10 +1256,10 @@ const styles = {
         marginBottom: 14,
     },
     dateText: { fontSize: 15, color: '#9ca3af' },
-    dateTextSelected: { color: '#111827', fontWeight: '500' },
+    dateTextSelected: { color: '#111827', fontWeight: '500' as const },
     modalButtons: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
+        flexDirection: 'row' as const,
+        justifyContent: 'space-between' as const,
         marginTop: 20,
         gap: 12,
     },
@@ -1209,23 +1267,23 @@ const styles = {
         flex: 1,
         paddingVertical: 14,
         borderRadius: 8,
-        alignItems: 'center',
+        alignItems: 'center' as const,
     },
     cancelButton: { backgroundColor: '#e5e7eb' },
     saveButton: { backgroundColor: '#1d4ed8' },
-    cancelText: { color: '#374151', fontWeight: '600' },
-    saveText: { color: '#fff', fontWeight: 'bold' },
+    cancelText: { color: '#374151', fontWeight: '600' as const },
+    saveText: { color: '#fff', fontWeight: '700' as const },
 
     detailRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
+        flexDirection: 'row' as const,
+        justifyContent: 'space-between' as const,
         paddingVertical: 12,
         borderBottomWidth: 1,
         borderBottomColor: '#e5e7eb',
     },
     detailLabel: {
         fontSize: 15,
-        fontWeight: '600',
+        fontWeight: '600' as const,
         color: '#374151',
         flex: 1,
     },
@@ -1233,27 +1291,27 @@ const styles = {
         fontSize: 15,
         color: '#111827',
         flex: 1,
-        textAlign: 'right',
+        textAlign: 'right' as const,
     },
     viewModalButtons: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
+        flexDirection: 'row' as const,
+        justifyContent: 'space-between' as const,
         marginTop: 24,
         gap: 12,
     },
     editButtonStyle: { backgroundColor: '#1d4ed8' },
-    editButtonText: { color: '#fff', fontWeight: 'bold' },
+    editButtonText: { color: '#fff', fontWeight: '700' as const },
     deleteButtonStyle: { backgroundColor: '#ef4444' },
-    deleteButtonText: { color: '#fff', fontWeight: 'bold' },
+    deleteButtonText: { color: '#fff', fontWeight: '700' as const },
     closeButton: {
         backgroundColor: '#e5e7eb',
         paddingVertical: 14,
         borderRadius: 8,
-        alignItems: 'center',
+        alignItems: 'center' as const,
         marginTop: 16,
     },
     emptyText: {
-        textAlign: 'center',
+        textAlign: 'center' as const,
         color: '#9ca3af',
         fontSize: 16,
         padding: 40,
@@ -1264,7 +1322,7 @@ const pickerModalStyles = {
     overlay: {
         flex: 1,
         backgroundColor: 'rgba(0,0,0,0.5)',
-        justifyContent: 'flex-end',
+        justifyContent: 'flex-end' as const,
     },
     container: {
         backgroundColor: 'white',
@@ -1274,7 +1332,7 @@ const pickerModalStyles = {
     },
     doneButton: {
         paddingVertical: 16,
-        alignItems: 'center',
+        alignItems: 'center' as const,
         backgroundColor: '#f0f0f0',
         borderTopWidth: 1,
         borderTopColor: '#ddd',
@@ -1282,11 +1340,11 @@ const pickerModalStyles = {
     doneText: {
         fontSize: 18,
         color: '#007AFF',
-        fontWeight: '600',
+        fontWeight: '600' as const,
     },
     fieldLabel: {
         fontSize: 14,
-        fontWeight: '500',
+        fontWeight: '500' as const,
         color: '#374151',
         marginBottom: 6,
     },
@@ -1295,11 +1353,11 @@ const pickerModalStyles = {
         borderColor: '#d1d5db',
         borderRadius: 8,
         backgroundColor: '#f9fafb',
-        overflow: 'hidden', // for clean rounded corners
+        overflow: 'hidden' as const,
     },
     picker: {
-        height: 50,           // important for Android
-        width: '100%',
+        height: 50,
+        width: '100%' as const,
         color: '#111827',
     },
 };
