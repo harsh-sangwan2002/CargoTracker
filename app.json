@@ -21,14 +21,21 @@
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Allow Cargo Tracker to access your location while the app is in use to show truck locations.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Allow Cargo Tracker to access your location in the background to send live location updates.",
-        "NSLocationAlwaysUsageDescription": "Allow Cargo Tracker to access your location in the background to send live location updates."
+        "NSLocationAlwaysUsageDescription": "Allow Cargo Tracker to access your location in the background to send live location updates.",
+        "NSPhotoLibraryUsageDescription": "Allow Cargo Tracker to access your photo library to add driver photos.",
+        "NSCameraUsageDescription": "Allow Cargo Tracker to access your camera to take driver photos."
       }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
-      }
+      },
+      "permissions": [
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "CAMERA"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -41,7 +48,9 @@
           "locationWhenInUsePermission": "Allow $(PRODUCT_NAME) to access your location while the app is in use"
         }
       ],
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-camera",
+      "expo-image-picker"
     ]
   }
 }

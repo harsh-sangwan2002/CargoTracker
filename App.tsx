@@ -6,6 +6,7 @@ import LoginScreen from './screens/LoginScreen';
 import RegisterScreen from './screens/RegisterScreen';
 import DashboardScreen from './screens/DashboardScreen';
 import DriverManagementScreen from './screens/DriverManagementScreen';
+import UserManagementScreen from './screens/UserManagementScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -14,6 +15,7 @@ export type RootStackParamList = {
   Register: undefined;
   Dashboard: undefined;
   DriverManagement: undefined;
+  UserManagement: undefined;
 };
 
 export default function App() {
@@ -29,6 +31,7 @@ export default function App() {
         <Stack.Screen name="Register" component={RegisterScreen} />
         <Stack.Screen name="Dashboard" component={DashboardScreen} />
         <Stack.Screen name="DriverManagement" component={DriverManagementScreen} />
+        <Stack.Screen name="UserManagement" component={UserManagementScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

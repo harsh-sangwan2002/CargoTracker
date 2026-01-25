@@ -6,9 +6,6 @@ import {
   deleteDoc,
   doc,
   serverTimestamp,
-  query,
-  where,
-  orderBy,
 } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 
@@ -28,53 +25,79 @@ const driversRef = collection(db, 'drivers');
 
 export const addDriver = async (driver: Omit<Driver, 'createdAt' | 'updatedAt'>) => {
   try {
+    console.log('📝 Adding driver:', driver);
     const docRef = await addDoc(driversRef, {
       ...driver,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
+    console.log('✅ Driver added with ID:', docRef.id);
     return docRef.id;
   } catch (error) {
-    console.error('Error adding driver:', error);
+    console.error('❌ Error adding driver:', error);
     throw error;
   }
 };
 
 export const getDrivers = async (userId?: string) => {
   try {
-    let q;
+    console.log('🔍 Starting getDrivers - userId:', userId);
+    
+    // Get all drivers without any complex queries
+    console.log('📡 Calling getDocs on driversRef...');
+    const snapshot = await getDocs(driversRef);
+    
+    console.log('📦 Snapshot received, total docs:', snapshot.docs.length);
+
+    const drivers = snapshot.docs.map(docSnap => {
+      const data = docSnap.data();
+      return {
+        id: docSnap.id,
+        fullName: data.fullName || '',
+        age: data.age || 0,
+        address: data.address || '',
+        aadhaarCard: data.aadhaarCard || '',
+        panCard: data.panCard || '',
+        photoUrl: data.photoUrl || '',
+        userId: data.userId || '',
+        createdAt: data.createdAt,
+        updatedAt: data.updatedAt,
+      };
+    }) as (Driver & { id: string })[];
+
+    console.log('✅ Total drivers:', drivers.length);
+
+    // Filter by userId if provided
     if (userId) {
-      q = query(
-        driversRef,
-        where('userId', '==', userId),
-        orderBy('createdAt', 'desc')
-      );
-    } else {
-      q = query(driversRef, orderBy('createdAt', 'desc'));
+      const filtered = drivers.filter(d => d.userId === userId);
+      console.log(`🔎 Filtered by userId: ${drivers.length} -> ${filtered.length}`);
+      return filtered;
     }
 
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map(docSnap => ({
-      id: docSnap.id,
-      ...docSnap.data(),
-    })) as (Driver & { id: string })[];
-  } catch (error) {
-    console.error('Error getting drivers:', error);
-    throw error;
+    return drivers;
+  } catch (error: any) {
+    console.error('❌ ERROR in getDrivers:', {
+      message: error.message,
+      code: error.code,
+    });
+    return [];
   }
 };
 
 export const getDriverById = async (driverId: string) => {
   try {
     const docRef = doc(db, 'drivers', driverId);
-    const snapshot = await getDocs(query(driversRef));
+    const snapshot = await getDocs(driversRef);
     const driverDoc = snapshot.docs.find(doc => doc.id === driverId);
     
     if (driverDoc) {
-      return {
-        id: driverDoc.id,
-        ...driverDoc.data(),
-      } as Driver & { id: string };
+      const data = driverDoc.data();
+      if (data) {
+        return {
+          id: driverDoc.id,
+          ...data,
+        } as Driver & { id: string };
+      }
     }
     return null;
   } catch (error) {

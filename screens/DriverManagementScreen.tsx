@@ -13,7 +13,7 @@ import {
   Image,
   ActivityIndicator,
 } from 'react-native';
-import { launchImageLibrary } from 'react-native-image-picker';
+import * as ImagePicker from 'expo-image-picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { auth } from '../firebaseConfig';
@@ -38,7 +38,6 @@ export default function DriverManagementScreen() {
   const [aadhaarCard, setAadhaarCard] = useState('');
   const [panCard, setPanCard] = useState('');
   const [photoUrl, setPhotoUrl] = useState('');
-  const [photoBase64, setPhotoBase64] = useState('');
 
   // Edit form states
   const [editFullName, setEditFullName] = useState('');
@@ -47,7 +46,6 @@ export default function DriverManagementScreen() {
   const [editAadhaarCard, setEditAadhaarCard] = useState('');
   const [editPanCard, setEditPanCard] = useState('');
   const [editPhotoUrl, setEditPhotoUrl] = useState('');
-  const [editPhotoBase64, setEditPhotoBase64] = useState('');
 
   useEffect(() => {
     loadDrivers();
@@ -56,43 +54,99 @@ export default function DriverManagementScreen() {
   const loadDrivers = async () => {
     try {
       setLoading(true);
+      console.log('Loading drivers for userId:', user?.uid);
       const fetchedDrivers = await getDrivers(user?.uid);
+      console.log('Fetched Drivers:', fetchedDrivers);
       setDrivers(fetchedDrivers);
     } catch (error) {
       console.error('Error loading drivers:', error);
-      Alert.alert('Error', 'Failed to load drivers');
+      Alert.alert('Error', 'Failed to load drivers. Check console for details.');
     } finally {
       setLoading(false);
     }
   };
 
-  const pickImage = async (isEditing: boolean = false) => {
-    try {
-      const result = await launchImageLibrary({
-        mediaType: 'photo',
-        includeBase64: true,
-        quality: 0.8,
-      }, (response) => {
-        if (response.didCancel) {
-          console.log('User cancelled image picker');
-        } else if (response.errorCode) {
-          Alert.alert('Error', 'Failed to pick image');
-        } else if (response.assets && response.assets.length > 0) {
-          const asset = response.assets[0];
-          const base64 = asset.base64 || '';
-          const dataUrl = `data:image/jpeg;base64,${base64}`;
+  const pickImage = (isEditing: boolean = false) => {
+    Alert.alert('Select Photo', 'Choose an option:', [
+      {
+        text: '📷 Take Photo',
+        onPress: () => takePhoto(isEditing),
+      },
+      {
+        text: '🖼️ Choose from Gallery',
+        onPress: () => selectFromGallery(isEditing),
+      },
+      {
+        text: 'Cancel',
+        onPress: () => console.log('Cancelled'),
+        style: 'cancel',
+      },
+    ]);
+  };
 
-          if (isEditing) {
-            setEditPhotoUrl(asset.uri || '');
-            setEditPhotoBase64(dataUrl);
-          } else {
-            setPhotoUrl(asset.uri || '');
-            setPhotoBase64(dataUrl);
-          }
-        }
+  const takePhoto = async (isEditing: boolean = false) => {
+    try {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Permission Denied', 'Camera permission is required');
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
       });
+
+      console.log('📸 Camera result:', result);
+      
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        console.log('✅ Photo taken:', asset.uri);
+        
+        if (isEditing) {
+          setEditPhotoUrl(asset.uri);
+        } else {
+          setPhotoUrl(asset.uri);
+        }
+      }
     } catch (error) {
-      Alert.alert('Error', 'Failed to launch image picker');
+      console.error('❌ Camera error:', error);
+      Alert.alert('Error', 'Failed to take photo');
+    }
+  };
+
+  const selectFromGallery = async (isEditing: boolean = false) => {
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Permission Denied', 'Photo library permission is required');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      console.log('🖼️ Gallery result:', result);
+      
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        console.log('✅ Image selected:', asset.uri);
+        
+        if (isEditing) {
+          setEditPhotoUrl(asset.uri);
+        } else {
+          setPhotoUrl(asset.uri);
+        }
+      }
+    } catch (error) {
+      console.error('❌ Gallery error:', error);
+      Alert.alert('Error', 'Failed to select image');
     }
   };
 
@@ -103,7 +157,6 @@ export default function DriverManagementScreen() {
     setAadhaarCard('');
     setPanCard('');
     setPhotoUrl('');
-    setPhotoBase64('');
   };
 
   const handleAddDriver = async () => {
@@ -134,7 +187,7 @@ export default function DriverManagementScreen() {
         address: address.trim(),
         aadhaarCard: aadhaarCard.trim(),
         panCard: panCard.trim().toUpperCase(),
-        photoUrl: photoBase64 || '',
+        photoUrl: photoUrl || '',
         userId: user?.uid || '',
       };
 
@@ -182,7 +235,7 @@ export default function DriverManagementScreen() {
         address: editAddress.trim(),
         aadhaarCard: editAadhaarCard.trim(),
         panCard: editPanCard.trim().toUpperCase(),
-        photoUrl: editPhotoBase64 || selectedDriver.photoUrl,
+        photoUrl: editPhotoUrl || selectedDriver.photoUrl,
       };
 
       await updateDriver(selectedDriver.id, updatedData);
@@ -405,9 +458,9 @@ export default function DriverManagementScreen() {
                     style={styles.photoSection}
                     onPress={() => pickImage(true)}
                   >
-                    {editPhotoBase64 || (selectedDriver?.photoUrl && selectedDriver.photoUrl.startsWith('data:')) ? (
+                    {editPhotoUrl ? (
                       <Image
-                        source={{ uri: editPhotoBase64 || selectedDriver?.photoUrl }}
+                        source={{ uri: editPhotoUrl }}
                         style={styles.photoPreview}
                       />
                     ) : (

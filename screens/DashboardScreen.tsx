@@ -18,7 +18,7 @@ import { auth } from '../firebaseConfig';
 import { signOut } from 'firebase/auth';
 import { useNavigation } from '@react-navigation/native';
 import { getTrips, addTrip, TripFirestore, updateTrip, deleteTrip } from '../services/tripService';
-import { isManager } from '../services/userService';
+import { isManager, isAdmin } from '../services/userService';
 
 export default function DashboardScreen() {
     const navigation = useNavigation<any>();
@@ -27,6 +27,7 @@ export default function DashboardScreen() {
     // Add trip modal
     const [addModalVisible, setAddModalVisible] = useState(false);
     const [isUserManager, setIsUserManager] = useState(false);
+    const [isUserAdmin, setIsUserAdmin] = useState(false);
     const [checkingRole, setCheckingRole] = useState(true);
 
     // Add trip form states
@@ -114,7 +115,9 @@ export default function DashboardScreen() {
         try {
             if (user?.uid) {
                 const manager = await isManager(user.uid);
+                const admin = await isAdmin(user.uid);
                 setIsUserManager(manager);
+                setIsUserAdmin(admin);
             }
         } catch (error) {
             console.error('Error checking user role:', error);
@@ -339,6 +342,15 @@ export default function DashboardScreen() {
                         >
                             <Text style={styles.adminButtonText}>👥 Manage Drivers</Text>
                         </TouchableOpacity>
+
+                        {isUserAdmin && (
+                            <TouchableOpacity 
+                                style={[styles.adminButton, { backgroundColor: '#dc2626' }]}
+                                onPress={() => navigation.navigate('UserManagement')}
+                            >
+                                <Text style={styles.adminButtonText}>👤 User Management</Text>
+                            </TouchableOpacity>
+                        )}
                         
                         <TouchableOpacity 
                             style={styles.addDriverButton}
