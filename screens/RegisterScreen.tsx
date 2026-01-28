@@ -12,6 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { auth } from '../firebaseConfig';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { useNavigation } from '@react-navigation/native';
+import { createUserProfile } from '../services/userService';
 
 export default function RegisterScreen() {
     const [email, setEmail] = useState('');
@@ -32,9 +33,13 @@ export default function RegisterScreen() {
 
         setLoading(true);
         try {
-            await createUserWithEmailAndPassword(auth, email, password);
+            const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+            
+            // Create user profile with default 'driver' role
+            await createUserProfile(userCredential.user.uid, email, 'driver');
+            
             Alert.alert('Success ✓', 'Account created successfully!');
-            navigation.replace('Login'); // replace so user can't go back to register
+            navigation.replace('Login');
         } catch (err: any) {
             let message = 'Registration failed. Please try again.';
             if (err.code === 'auth/email-already-in-use') {
@@ -153,7 +158,7 @@ const styles = StyleSheet.create({
         backgroundColor: '#1d4ed8',
         borderRadius: 8,
         paddingVertical: 14,
-        alignItems: 'center',
+        alignItems: 'center' as const,
         marginTop: 8,
     },
     buttonDisabled: {
