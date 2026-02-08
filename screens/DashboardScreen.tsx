@@ -116,11 +116,15 @@ export default function DashboardScreen() {
             if (user?.uid) {
                 const manager = await isManager(user.uid);
                 const admin = await isAdmin(user.uid);
-                setIsUserManager(manager);
+                console.log('🔍 Role Check:', { manager, admin, uid: user.uid, email: user.email });
+                console.log('👁️ isUserManager will be:', manager || admin);
+                setIsUserManager(manager || admin); // Both managers and admins get access
                 setIsUserAdmin(admin);
+            } else {
+                console.log('⚠️ No user UID found');
             }
         } catch (error) {
-            console.error('Error checking user role:', error);
+            console.error('❌ Error checking user role:', error);
         } finally {
             setCheckingRole(false);
         }
@@ -333,7 +337,7 @@ export default function DashboardScreen() {
                     </TouchableOpacity>
                 </View>
 
-                {/* Manager Section - Driver Management */}
+                {/* Manager/Admin Section - Full Permissions */}
                 {isUserManager && !checkingRole && (
                     <View style={styles.managerButtonsContainer}>
                         <TouchableOpacity 
@@ -343,14 +347,12 @@ export default function DashboardScreen() {
                             <Text style={styles.adminButtonText}>👥 Manage Drivers</Text>
                         </TouchableOpacity>
 
-                        {isUserAdmin && (
-                            <TouchableOpacity 
-                                style={[styles.adminButton, { backgroundColor: '#dc2626' }]}
-                                onPress={() => navigation.navigate('UserManagement')}
-                            >
-                                <Text style={styles.adminButtonText}>👤 User Management</Text>
-                            </TouchableOpacity>
-                        )}
+                        <TouchableOpacity 
+                            style={[styles.adminButton, { backgroundColor: '#dc2626' }]}
+                            onPress={() => navigation.navigate('UserManagement')}
+                        >
+                            <Text style={styles.adminButtonText}>👤 Manage Users</Text>
+                        </TouchableOpacity>
                         
                         <TouchableOpacity 
                             style={styles.addDriverButton}
@@ -1081,11 +1083,13 @@ const styles = {
     },
     managerButtonsContainer: {
         flexDirection: 'row' as const,
+        flexWrap: 'wrap' as const,
         gap: 12,
         marginBottom: 20,
     },
     adminButton: {
         flex: 1,
+        minWidth: 150,
         backgroundColor: '#10b981',
         borderRadius: 10,
         paddingVertical: 14,
@@ -1103,6 +1107,7 @@ const styles = {
     },
     addDriverButton: {
         flex: 1,
+        minWidth: 150,
         backgroundColor: '#3b82f6',
         borderRadius: 10,
         paddingVertical: 14,

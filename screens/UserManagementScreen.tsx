@@ -9,11 +9,12 @@ import {
   SafeAreaView,
   Modal,
   Pressable,
+  TextInput,
 } from 'react-native';
 import { collection, getDocs, doc, updateDoc } from 'firebase/firestore';
 import { db, auth } from '../firebaseConfig';
 import { useNavigation } from '@react-navigation/native';
-import { isAdmin } from '../services/userService';
+import { isAdmin, isManager } from '../services/userService';
 import { Picker } from '@react-native-picker/picker';
 
 interface User {
@@ -28,9 +29,13 @@ export default function UserManagementScreen() {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [isUserAdmin, setIsUserAdmin] = useState(false);
+  const [isUserManager, setIsUserManager] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [showRoleModal, setShowRoleModal] = useState(false);
   const [newRole, setNewRole] = useState<'driver' | 'manager' | 'admin'>('driver');
+  const [showAddUserModal, setShowAddUserModal] = useState(false);
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserRole, setNewUserRole] = useState<'driver' | 'manager' | 'admin'>('driver');
 
   const currentUser = auth.currentUser;
 
@@ -46,19 +51,22 @@ export default function UserManagementScreen() {
     }
 
     try {
-      // Check if user is admin
-      const admin = await isAdmin(currentUser.uid);
-      if (!admin) {
-        Alert.alert('Access Denied', 'Only admins can access this page');
+      // Check if user is admin or manager
+      const adminStatus = await isAdmin(currentUser.uid);
+      const managerStatus = await isManager(currentUser.uid);
+      
+      if (!adminStatus && !managerStatus) {
+        Alert.alert('Access Denied', 'Only admins and managers can access this page');
         navigation.goBack();
         return;
       }
 
-      setIsUserAdmin(true);
+      setIsUserAdmin(adminStatus);
+      setIsUserManager(adminStatus || managerStatus); // Set true if either admin or manager
       await fetchUsers();
     } catch (error) {
-      console.error('Error checking admin status:', error);
-      Alert.alert('Error', 'Failed to verify admin status');
+      console.error('Error checking admin/manager status:', error);
+      Alert.alert('Error', 'Failed to verify status');
       navigation.goBack();
     }
   };
@@ -115,6 +123,31 @@ export default function UserManagementScreen() {
     setShowRoleModal(true);
   };
 
+  const handleAddUser = async () => {
+    if (!newUserEmail.trim()) {
+      Alert.alert('Error', 'Please enter an email address');
+      return;
+    }
+
+    try {
+      // Create new user with temporary password
+      const tempPassword = Math.random().toString(36).slice(-8);
+      
+      // Call Firebase Auth API to create user
+      // For this, you'll need a backend function or use a different approach
+      // For now, showing a placeholder alert
+      Alert.alert('User Creation', `Would create user: ${newUserEmail}\nRole: ${newUserRole}\n\nNote: Implement backend user creation in Firebase`);
+      
+      // Reset form
+      setNewUserEmail('');
+      setNewUserRole('driver');
+      setShowAddUserModal(false);
+    } catch (error) {
+      console.error('Error adding user:', error);
+      Alert.alert('Error', 'Failed to add user');
+    }
+  };
+
   const getRoleColor = (role: string) => {
     switch (role) {
       case 'admin':
@@ -139,7 +172,7 @@ export default function UserManagementScreen() {
     );
   }
 
-  if (!isUserAdmin) {
+  if (!isUserAdmin && !isUserManager) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.centerContent}>
@@ -156,7 +189,12 @@ export default function UserManagementScreen() {
           <Text style={styles.backButton}>← Back</Text>
         </TouchableOpacity>
         <Text style={styles.title}>User Management</Text>
-        <View style={styles.placeholder} />
+        <TouchableOpacity 
+          onPress={() => setShowAddUserModal(true)}
+          style={styles.addButton}
+        >
+          <Text style={styles.addButtonText}>+ Add User</Text>
+        </TouchableOpacity>
       </View>
 
       <View style={styles.statsContainer}>
@@ -267,6 +305,79 @@ export default function UserManagementScreen() {
           </View>
         </Pressable>
       </Modal>
+
+      {/* Add User Modal */}
+      <Modal
+        visible={showAddUserModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowAddUserModal(false)}
+      >
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => setShowAddUserModal(false)}
+        >
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Add New User</Text>
+
+            <View style={styles.pickerContainer}>
+              <Text style={styles.pickerLabel}>Email Address:</Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="user@example.com"
+                placeholderTextColor="#9ca3af"
+                value={newUserEmail}
+                onChangeText={setNewUserEmail}
+                keyboardType="email-address"
+              />
+            </View>
+
+            <View style={styles.pickerContainer}>
+              <Text style={styles.pickerLabel}>User Role:</Text>
+              <View style={styles.rolesContainer}>
+                {['driver', 'manager', 'admin'].map((role) => (
+                  <TouchableOpacity
+                    key={role}
+                    style={[
+                      styles.roleOption,
+                      newUserRole === role && styles.roleOptionSelected,
+                    ]}
+                    onPress={() => setNewUserRole(role as 'driver' | 'manager' | 'admin')}
+                  >
+                    <Text
+                      style={[
+                        styles.roleOptionText,
+                        newUserRole === role && styles.roleOptionTextSelected,
+                      ]}
+                    >
+                      {role.charAt(0).toUpperCase() + role.slice(1)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            <View style={styles.modalButtonContainer}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.cancelButton]}
+                onPress={() => {
+                  setShowAddUserModal(false);
+                  setNewUserEmail('');
+                  setNewUserRole('driver');
+                }}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.confirmButton]}
+                onPress={handleAddUser}
+              >
+                <Text style={styles.confirmButtonText}>Add User</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -281,7 +392,7 @@ const styles = {
     alignItems: 'center' as const,
     justifyContent: 'space-between' as const,
     paddingHorizontal: 16,
-    paddingVertical: 16,
+    paddingVertical: 12,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#e5e7eb',
@@ -296,8 +407,16 @@ const styles = {
     fontWeight: '700' as const,
     color: '#111827',
   },
-  placeholder: {
-    width: 50,
+  addButton: {
+    backgroundColor: '#10b981',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  addButtonText: {
+    color: '#fff',
+    fontWeight: '600' as const,
+    fontSize: 13,
   },
   statsContainer: {
     flexDirection: 'row' as const,
@@ -484,5 +603,16 @@ const styles = {
     color: '#fff',
     fontWeight: '600' as const,
     fontSize: 14,
+  },
+  textInput: {
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#111827',
+    backgroundColor: '#f9fafb',
+    marginBottom: 16,
   },
 };

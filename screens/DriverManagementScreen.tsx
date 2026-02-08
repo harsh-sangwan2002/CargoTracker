@@ -18,6 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { auth } from '../firebaseConfig';
 import { getDrivers, addDriver, updateDriver, deleteDriver, Driver } from '../services/driverService';
+import { convertImageToBase64 } from '../services/userService';
 
 export default function DriverManagementScreen() {
   const navigation = useNavigation<any>();
@@ -105,10 +106,13 @@ export default function DriverManagementScreen() {
         const asset = result.assets[0];
         console.log('✅ Photo taken:', asset.uri);
         
+        // Convert to base64 instead of storing cache path
+        const base64Image = await convertImageToBase64(asset.uri);
+        
         if (isEditing) {
-          setEditPhotoUrl(asset.uri);
+          setEditPhotoUrl(base64Image);
         } else {
-          setPhotoUrl(asset.uri);
+          setPhotoUrl(base64Image);
         }
       }
     } catch (error) {
@@ -138,10 +142,13 @@ export default function DriverManagementScreen() {
         const asset = result.assets[0];
         console.log('✅ Image selected:', asset.uri);
         
+        // Convert to base64 instead of storing cache path
+        const base64Image = await convertImageToBase64(asset.uri);
+        
         if (isEditing) {
-          setEditPhotoUrl(asset.uri);
+          setEditPhotoUrl(base64Image);
         } else {
-          setPhotoUrl(asset.uri);
+          setPhotoUrl(base64Image);
         }
       }
     } catch (error) {

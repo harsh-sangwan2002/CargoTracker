@@ -9,6 +9,7 @@ import {
   where,
 } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
+import * as FileSystem from 'expo-file-system';
 
 export interface UserProfile {
   uid: string;
@@ -66,6 +67,7 @@ export const updateUserRole = async (uid: string, role: 'driver' | 'manager' | '
 export const isManager = async (uid: string): Promise<boolean> => {
   try {
     const profile = await getUserProfile(uid);
+    console.log('📋 Manager check for', uid, ':', profile);
     return profile?.role === 'manager' || profile?.role === 'admin';
   } catch (error) {
     console.error('Error checking manager status:', error);
@@ -80,5 +82,29 @@ export const isAdmin = async (uid: string): Promise<boolean> => {
   } catch (error) {
     console.error('Error checking admin status:', error);
     return false;
+  }
+};
+
+// Convert image file to base64 data URL
+export const convertImageToBase64 = async (imageUri: string): Promise<string> => {
+  try {
+    // If it's already a data URI, return as is
+    if (imageUri.startsWith('data:')) {
+      return imageUri;
+    }
+
+    // Read file and convert to base64
+    const base64 = await FileSystem.readAsStringAsync(imageUri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+
+    // Determine image type
+    const imageType = imageUri.toLowerCase().endsWith('.png') ? 'png' : 'jpeg';
+    
+    return `data:image/${imageType};base64,${base64}`;
+  } catch (error) {
+    console.error('Error converting image to base64:', error);
+    // Return original URI if conversion fails
+    return imageUri;
   }
 };
