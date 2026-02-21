@@ -340,21 +340,21 @@ export default function DashboardScreen() {
                 {/* Manager/Admin Section - Full Permissions */}
                 {isUserManager && !checkingRole && (
                     <View style={styles.managerButtonsContainer}>
-                        <TouchableOpacity 
+                        <TouchableOpacity
                             style={styles.adminButton}
                             onPress={() => navigation.navigate('DriverManagement')}
                         >
                             <Text style={styles.adminButtonText}>👥 Manage Drivers</Text>
                         </TouchableOpacity>
 
-                        <TouchableOpacity 
+                        <TouchableOpacity
                             style={[styles.adminButton, { backgroundColor: '#dc2626' }]}
                             onPress={() => navigation.navigate('UserManagement')}
                         >
                             <Text style={styles.adminButtonText}>👤 Manage Users</Text>
                         </TouchableOpacity>
-                        
-                        <TouchableOpacity 
+
+                        <TouchableOpacity
                             style={styles.addDriverButton}
                             onPress={() => navigation.navigate('DriverManagement')}
                         >

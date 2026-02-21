@@ -5,62 +5,11 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
-    },
-    "updates": {
-      "fallbackToCacheTimeout": 0
-    },
-    "assetBundlePatterns": [
-      "**/*"
-    ],
     "ios": {
-      "supportsTablet": true,
-      "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Allow Cargo Tracker to access your location while the app is in use to show truck locations.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "Allow Cargo Tracker to access your location in the background to send live location updates.",
-        "NSLocationAlwaysUsageDescription": "Allow Cargo Tracker to access your location in the background to send live location updates.",
-        "NSPhotoLibraryUsageDescription": "Allow Cargo Tracker to access your photo library to add driver photos.",
-        "NSCameraUsageDescription": "Allow Cargo Tracker to access your camera to take driver photos."
-      }
+      "bundleIdentifier": "com.harsh.cargotracker"
     },
     "android": {
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
-      },
-      "permissions": [
-        "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.CAMERA",
-        "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION",
-        "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO"
-      ],
-      "package": "com.asangwan8998.cargotracker"
-    },
-    "web": {
-      "favicon": "./assets/favicon.png"
-    },
-    "plugins": [
-      [
-        "expo-location",
-        {
-          "locationAlwaysAndWhenInUsePermission": "Allow $(PRODUCT_NAME) to use your location",
-          "locationWhenInUsePermission": "Allow $(PRODUCT_NAME) to access your location while the app is in use"
-        }
-      ],
-      "@react-native-community/datetimepicker",
-      "expo-camera",
-      "expo-image-picker"
-    ],
-    "extra": {
-      "eas": {
-        "projectId": "31ceae25-f7b1-493f-bcbb-9538935d5bbd"
-      }
+      "package": "com.harsh.cargotracker"
     }
   }
 }
