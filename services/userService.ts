@@ -95,7 +95,7 @@ export const convertImageToBase64 = async (imageUri: string): Promise<string> =>
 
     // Read file and convert to base64
     const base64 = await FileSystem.readAsStringAsync(imageUri, {
-      encoding: FileSystem.EncodingType.Base64,
+      encoding: 'base64',
     });
 
     // Determine image type
