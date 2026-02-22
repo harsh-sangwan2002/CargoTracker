@@ -32,8 +32,6 @@ ios/*.xcworkspace
 # -------------------------
 .env
 .env.*
-firebaseConfig.js
-firebaseConfig.ts
 
 # -------------------------
 # OS / Editor
