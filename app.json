@@ -9,7 +9,21 @@
       "bundleIdentifier": "com.harsh.cargotracker"
     },
     "android": {
-      "package": "com.harsh.cargotracker"
-    }
+      "package": "com.harsh.cargotracker",
+      "permissions": [
+        "CAMERA",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ]
+    },
+    "extra": {
+      "eas": {
+        "projectId": "fb72e6cb-948e-44c1-a9b0-395322c8ae67"
+      }
+    },
+    "owner": "harsh-sangwan",
+    "plugins": [
+      "expo-font"
+    ]
   }
 }
