@@ -11,11 +11,17 @@ import {
   Pressable,
   TextInput,
 } from 'react-native';
-import { collection, getDocs, doc, updateDoc } from 'firebase/firestore';
+import {
+  collection,
+  getDocs,
+  doc,
+  updateDoc,
+  query,
+  where,
+} from 'firebase/firestore';
 import { db, auth } from '../firebaseConfig';
 import { useNavigation } from '@react-navigation/native';
 import { isAdmin, isManager } from '../services/userService';
-import { Picker } from '@react-native-picker/picker';
 
 interface User {
   uid: string;
@@ -124,21 +130,38 @@ export default function UserManagementScreen() {
   };
 
   const handleAddUser = async () => {
-    if (!newUserEmail.trim()) {
+    const email = newUserEmail.trim().toLowerCase();
+    if (!email) {
       Alert.alert('Error', 'Please enter an email address');
       return;
     }
 
+    if (!currentUser?.uid) {
+      Alert.alert('Error', 'Not authenticated');
+      return;
+    }
+
+    if (!isUserAdmin) {
+      Alert.alert('Access Denied', 'Only admins can add users');
+      return;
+    }
+
     try {
-      // Create new user with temporary password
-      const tempPassword = Math.random().toString(36).slice(-8);
-      
-      // Call Firebase Auth API to create user
-      // For this, you'll need a backend function or use a different approach
-      // For now, showing a placeholder alert
-      Alert.alert('User Creation', `Would create user: ${newUserEmail}\nRole: ${newUserRole}\n\nNote: Implement backend user creation in Firebase`);
-      
-      // Reset form
+      const existingSnap = await getDocs(query(collection(db, 'users'), where('email', '==', email)));
+      if (!existingSnap.empty) {
+        const existing = existingSnap.docs[0];
+        await updateDoc(doc(db, 'users', existing.id), { role: newUserRole });
+
+        setUsers(users.map((u) => (u.uid === existing.id ? { ...u, role: newUserRole } : u)));
+        Alert.alert('Success', `Updated role for ${email} to ${newUserRole}`);
+      } else {
+        Alert.alert(
+          'User Not Found',
+          'This email has not registered yet. Ask the user to register first, then come back to set their role.'
+        );
+        return;
+      }
+
       setNewUserEmail('');
       setNewUserRole('driver');
       setShowAddUserModal(false);
@@ -189,12 +212,16 @@ export default function UserManagementScreen() {
           <Text style={styles.backButton}>← Back</Text>
         </TouchableOpacity>
         <Text style={styles.title}>User Management</Text>
-        <TouchableOpacity 
-          onPress={() => setShowAddUserModal(true)}
-          style={styles.addButton}
-        >
-          <Text style={styles.addButtonText}>+ Add User</Text>
-        </TouchableOpacity>
+        {isUserAdmin ? (
+          <TouchableOpacity
+            onPress={() => setShowAddUserModal(true)}
+            style={styles.addButton}
+          >
+            <Text style={styles.addButtonText}>+ Add User</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={{ width: 80 }} />
+        )}
       </View>
 
       <View style={styles.statsContainer}>
@@ -329,6 +356,7 @@ export default function UserManagementScreen() {
                 value={newUserEmail}
                 onChangeText={setNewUserEmail}
                 keyboardType="email-address"
+                autoCapitalize="none"
               />
             </View>
 

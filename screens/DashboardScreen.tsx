@@ -15,10 +15,15 @@ import { Picker } from '@react-native-picker/picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { auth } from '../firebaseConfig';
-import { signOut } from 'firebase/auth';
+import {
+    signOut,
+    EmailAuthProvider,
+    reauthenticateWithCredential,
+    deleteUser,
+} from 'firebase/auth';
 import { useNavigation } from '@react-navigation/native';
 import { getTrips, addTrip, TripFirestore, updateTrip, deleteTrip } from '../services/tripService';
-import { isManager, isAdmin } from '../services/userService';
+import { deleteUserAccountData, isManager, isAdmin } from '../services/userService';
 
 export default function DashboardScreen() {
     const navigation = useNavigation<any>();
@@ -57,6 +62,11 @@ export default function DashboardScreen() {
     const [viewModalVisible, setViewModalVisible] = useState(false);
     const [selectedTrip, setSelectedTrip] = useState<(TripFirestore & { id: string }) | null>(null);
     const [isEditing, setIsEditing] = useState(false);
+
+    // Account deletion
+    const [deleteAccountModalVisible, setDeleteAccountModalVisible] = useState(false);
+    const [deleteAccountPassword, setDeleteAccountPassword] = useState('');
+    const [deletingAccount, setDeletingAccount] = useState(false);
 
     // Edit form states
     const [editVehicleNo, setEditVehicleNo] = useState('');
@@ -155,6 +165,59 @@ export default function DashboardScreen() {
                 },
             },
         ]);
+    };
+
+    const openDeleteAccount = () => {
+        Alert.alert(
+            'Delete Account',
+            'This will permanently delete your account and all data. This cannot be undone.',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Continue',
+                    style: 'destructive',
+                    onPress: () => setDeleteAccountModalVisible(true),
+                },
+            ]
+        );
+    };
+
+    const handleConfirmDeleteAccount = async () => {
+        const current = auth.currentUser;
+        if (!current?.email) {
+            Alert.alert('Error', 'Not authenticated');
+            return;
+        }
+        if (!deleteAccountPassword.trim()) {
+            Alert.alert('Error', 'Please enter your password');
+            return;
+        }
+
+        setDeletingAccount(true);
+        try {
+            const credential = EmailAuthProvider.credential(
+                current.email,
+                deleteAccountPassword
+            );
+            await reauthenticateWithCredential(current, credential);
+
+            await deleteUserAccountData(current.uid);
+            await deleteUser(current);
+
+            setDeleteAccountModalVisible(false);
+            setDeleteAccountPassword('');
+            Alert.alert('Deleted', 'Your account has been deleted.');
+            navigation.replace('Login');
+        } catch (error: any) {
+            console.error('Error deleting account:', error);
+            const msg =
+                error?.code === 'auth/wrong-password'
+                    ? 'Incorrect password.'
+                    : 'Failed to delete account. Please try again.';
+            Alert.alert('Error', msg);
+        } finally {
+            setDeletingAccount(false);
+        }
     };
 
     const formatDateTime = (date: Date | null) => {
@@ -332,9 +395,17 @@ export default function DashboardScreen() {
                         <Text style={styles.welcomeText}>Welcome back!</Text>
                         <Text style={styles.emailText}>{user?.email || 'User'}</Text>
                     </View>
-                    <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
-                        <Text style={styles.logoutText}>Logout</Text>
-                    </TouchableOpacity>
+                    <View style={styles.headerActions}>
+                        <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
+                            <Text style={styles.logoutText}>Logout</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            onPress={openDeleteAccount}
+                            style={styles.deleteAccountButton}
+                        >
+                            <Text style={styles.deleteAccountText}>Delete account</Text>
+                        </TouchableOpacity>
+                    </View>
                 </View>
 
                 {/* Manager/Admin Section - Full Permissions */}
@@ -429,6 +500,61 @@ export default function DashboardScreen() {
             <TouchableOpacity style={styles.fab} onPress={() => setAddModalVisible(true)}>
                 <Text style={styles.fabText}>+</Text>
             </TouchableOpacity>
+
+            {/* Delete Account Modal */}
+            <Modal
+                visible={deleteAccountModalVisible}
+                transparent
+                animationType="fade"
+                onRequestClose={() => {
+                    if (!deletingAccount) setDeleteAccountModalVisible(false);
+                }}
+            >
+                <Pressable
+                    style={styles.modalOverlay}
+                    onPress={() => {
+                        if (!deletingAccount) setDeleteAccountModalVisible(false);
+                    }}
+                >
+                    <View style={styles.deleteModalContent}>
+                        <Text style={styles.deleteModalTitle}>Confirm account deletion</Text>
+                        <Text style={styles.deleteModalSubtitle}>
+                            Enter your password to delete your account.
+                        </Text>
+                        <TextInput
+                            style={styles.deletePasswordInput}
+                            placeholder="Password"
+                            value={deleteAccountPassword}
+                            onChangeText={setDeleteAccountPassword}
+                            secureTextEntry
+                            editable={!deletingAccount}
+                        />
+
+                        <View style={styles.deleteModalButtons}>
+                            <TouchableOpacity
+                                style={styles.deleteCancelButton}
+                                onPress={() => {
+                                    if (deletingAccount) return;
+                                    setDeleteAccountModalVisible(false);
+                                    setDeleteAccountPassword('');
+                                }}
+                                disabled={deletingAccount}
+                            >
+                                <Text style={styles.deleteCancelText}>Cancel</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.deleteConfirmButton}
+                                onPress={handleConfirmDeleteAccount}
+                                disabled={deletingAccount}
+                            >
+                                <Text style={styles.deleteConfirmText}>
+                                    {deletingAccount ? 'Deleting…' : 'Delete'}
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </Pressable>
+            </Modal>
 
             {/* ======================== ADD TRIP MODAL ======================== */}
             <Modal
@@ -1034,6 +1160,10 @@ const styles = {
         alignItems: 'center' as const,
         marginBottom: 24,
     },
+    headerActions: {
+        alignItems: 'flex-end' as const,
+        gap: 8,
+    },
     welcomeText: { fontSize: 28, fontWeight: '700' as const, color: '#111827' },
     emailText: { fontSize: 16, color: '#6b7280', marginTop: 4 },
     logoutButton: {
@@ -1043,6 +1173,74 @@ const styles = {
         borderRadius: 8,
     },
     logoutText: { color: '#fff', fontWeight: '600' as const },
+
+    deleteAccountButton: {
+        paddingVertical: 4,
+        paddingHorizontal: 6,
+    },
+    deleteAccountText: {
+        color: '#ef4444',
+        fontWeight: '600' as const,
+        fontSize: 12,
+    },
+
+    deleteModalContent: {
+        backgroundColor: '#fff',
+        borderRadius: 12,
+        padding: 18,
+        width: '88%' as const,
+        maxWidth: 420,
+        alignSelf: 'center' as const,
+    },
+    deleteModalTitle: {
+        fontSize: 18,
+        fontWeight: '700' as const,
+        color: '#111827',
+        marginBottom: 6,
+        textAlign: 'center' as const,
+    },
+    deleteModalSubtitle: {
+        fontSize: 13,
+        color: '#6b7280',
+        marginBottom: 14,
+        textAlign: 'center' as const,
+    },
+    deletePasswordInput: {
+        borderWidth: 1,
+        borderColor: '#e5e7eb',
+        borderRadius: 10,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        fontSize: 15,
+        backgroundColor: '#f9fafb',
+        marginBottom: 14,
+    },
+    deleteModalButtons: {
+        flexDirection: 'row' as const,
+        gap: 10,
+    },
+    deleteCancelButton: {
+        flex: 1,
+        backgroundColor: '#e5e7eb',
+        paddingVertical: 12,
+        borderRadius: 10,
+        alignItems: 'center' as const,
+    },
+    deleteCancelText: {
+        color: '#374151',
+        fontWeight: '600' as const,
+    },
+    deleteConfirmButton: {
+        flex: 1,
+        backgroundColor: '#ef4444',
+        paddingVertical: 12,
+        borderRadius: 10,
+        alignItems: 'center' as const,
+    },
+    deleteConfirmText: {
+        color: '#fff',
+        fontWeight: '700' as const,
+    },
 
     statsGrid: {
         flexDirection: 'row' as const,

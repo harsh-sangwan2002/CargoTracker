@@ -5,8 +5,11 @@ import {
   setDoc,
   getDoc,
   updateDoc,
+  deleteDoc,
+  writeBatch,
   query,
   where,
+  serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import * as FileSystem from 'expo-file-system';
@@ -20,6 +23,8 @@ export interface UserProfile {
 
 const usersRef = collection(db, 'users');
 
+const normalizeEmail = (email: string) => email.trim().toLowerCase();
+
 export const createUserProfile = async (
   uid: string,
   email: string,
@@ -29,7 +34,7 @@ export const createUserProfile = async (
     const userDocRef = doc(db, 'users', uid);
     await setDoc(userDocRef, {
       uid,
-      email,
+      email: normalizeEmail(email),
       role,
       createdAt: new Date(),
     });
@@ -95,7 +100,7 @@ export const convertImageToBase64 = async (imageUri: string): Promise<string> =>
 
     // Read file and convert to base64
     const base64 = await FileSystem.readAsStringAsync(imageUri, {
-      encoding: 'base64',
+      encoding: 'base64' as any,
     });
 
     // Determine image type
@@ -107,4 +112,29 @@ export const convertImageToBase64 = async (imageUri: string): Promise<string> =>
     // Return original URI if conversion fails
     return imageUri;
   }
+};
+
+const deleteDocsInBatches = async (docsToDelete: Array<{ ref: any }>) => {
+  const BATCH_LIMIT = 450;
+  for (let i = 0; i < docsToDelete.length; i += BATCH_LIMIT) {
+    const batch = writeBatch(db);
+    const slice = docsToDelete.slice(i, i + BATCH_LIMIT);
+    slice.forEach((d) => batch.delete(d.ref));
+    await batch.commit();
+  }
+};
+
+export const deleteUserAccountData = async (uid: string) => {
+  const tripsRef = collection(db, 'trips');
+  const driversRef = collection(db, 'drivers');
+
+  const [tripsSnap, driversSnap] = await Promise.all([
+    getDocs(query(tripsRef, where('userId', '==', uid))),
+    getDocs(query(driversRef, where('userId', '==', uid))),
+  ]);
+
+  await deleteDocsInBatches(tripsSnap.docs);
+  await deleteDocsInBatches(driversSnap.docs);
+
+  await deleteDoc(doc(usersRef, uid));
 };
