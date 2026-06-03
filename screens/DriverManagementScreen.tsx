@@ -38,6 +38,7 @@ export default function DriverManagementScreen() {
   const [address, setAddress] = useState('');
   const [aadhaarCard, setAadhaarCard] = useState('');
   const [panCard, setPanCard] = useState('');
+  const [vehicleOwned, setVehicleOwned] = useState('');
   const [photoUrl, setPhotoUrl] = useState('');
 
   // Edit form states
@@ -46,6 +47,7 @@ export default function DriverManagementScreen() {
   const [editAddress, setEditAddress] = useState('');
   const [editAadhaarCard, setEditAadhaarCard] = useState('');
   const [editPanCard, setEditPanCard] = useState('');
+  const [editVehicleOwned, setEditVehicleOwned] = useState('');
   const [editPhotoUrl, setEditPhotoUrl] = useState('');
 
   useEffect(() => {
@@ -101,14 +103,14 @@ export default function DriverManagementScreen() {
       });
 
       console.log('📸 Camera result:', result);
-      
+
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
         console.log('✅ Photo taken:', asset.uri);
-        
+
         // Convert to base64 instead of storing cache path
         const base64Image = await convertImageToBase64(asset.uri);
-        
+
         if (isEditing) {
           setEditPhotoUrl(base64Image);
         } else {
@@ -137,14 +139,14 @@ export default function DriverManagementScreen() {
       });
 
       console.log('🖼️ Gallery result:', result);
-      
+
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
         console.log('✅ Image selected:', asset.uri);
-        
+
         // Convert to base64 instead of storing cache path
         const base64Image = await convertImageToBase64(asset.uri);
-        
+
         if (isEditing) {
           setEditPhotoUrl(base64Image);
         } else {
@@ -163,11 +165,12 @@ export default function DriverManagementScreen() {
     setAddress('');
     setAadhaarCard('');
     setPanCard('');
+    setVehicleOwned('');
     setPhotoUrl('');
   };
 
   const handleAddDriver = async () => {
-    if (!fullName.trim() || !age.trim() || !address.trim() || !aadhaarCard.trim() || !panCard.trim()) {
+    if (!fullName.trim() || !age.trim() || !address.trim() || !aadhaarCard.trim() || !panCard.trim() || !vehicleOwned.trim()) {
       Alert.alert('Required Fields', 'Please fill all required fields');
       return;
     }
@@ -194,6 +197,7 @@ export default function DriverManagementScreen() {
         address: address.trim(),
         aadhaarCard: aadhaarCard.trim(),
         panCard: panCard.trim().toUpperCase(),
+        vehicleOwned: vehicleOwned.trim().toUpperCase(),
         photoUrl: photoUrl || '',
         userId: user?.uid || '',
       };
@@ -222,6 +226,7 @@ export default function DriverManagementScreen() {
       setEditAddress(selectedDriver.address);
       setEditAadhaarCard(selectedDriver.aadhaarCard);
       setEditPanCard(selectedDriver.panCard);
+      setEditVehicleOwned(selectedDriver.vehicleOwned || '');
       setEditPhotoUrl(selectedDriver.photoUrl);
       setIsEditing(true);
     }
@@ -230,7 +235,7 @@ export default function DriverManagementScreen() {
   const handleSaveEdit = async () => {
     if (!selectedDriver) return;
 
-    if (!editFullName.trim() || !editAge.trim() || !editAddress.trim() || !editAadhaarCard.trim() || !editPanCard.trim()) {
+    if (!editFullName.trim() || !editAge.trim() || !editAddress.trim() || !editAadhaarCard.trim() || !editPanCard.trim() || !editVehicleOwned.trim()) {
       Alert.alert('Error', 'Please fill all required fields');
       return;
     }
@@ -242,6 +247,7 @@ export default function DriverManagementScreen() {
         address: editAddress.trim(),
         aadhaarCard: editAadhaarCard.trim(),
         panCard: editPanCard.trim().toUpperCase(),
+        vehicleOwned: editVehicleOwned.trim().toUpperCase(),
         photoUrl: editPhotoUrl || selectedDriver.photoUrl,
       };
 
@@ -286,11 +292,11 @@ export default function DriverManagementScreen() {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Text style={styles.backButton}>← Back</Text>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+            <Text style={styles.backButtonIcon}>‹</Text>
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Drivers</Text>
-          <View style={{ width: 80 }} />
+          <View style={styles.headerSpacer} />
         </View>
 
         {/* Drivers List */}
@@ -320,6 +326,7 @@ export default function DriverManagementScreen() {
                 <View style={styles.driverInfo}>
                   <Text style={styles.driverName}>{driver.fullName}</Text>
                   <Text style={styles.driverAge}>Age: {driver.age}</Text>
+                  <Text style={styles.driverVehicle}>Vehicle: {driver.vehicleOwned || 'N/A'}</Text>
                   <Text style={styles.driverAddress}>{driver.address}</Text>
                   <Text style={styles.driverId}>Aadhaar: {driver.aadhaarCard}</Text>
                 </View>
@@ -415,6 +422,14 @@ export default function DriverManagementScreen() {
                 onChangeText={setPanCard}
                 autoCapitalize="characters"
                 maxLength={10}
+              />
+
+              <TextInput
+                style={styles.modalInput}
+                placeholder="Vehicle Owned *"
+                value={vehicleOwned}
+                onChangeText={setVehicleOwned}
+                autoCapitalize="characters"
               />
 
               {/* Buttons */}
@@ -526,6 +541,14 @@ export default function DriverManagementScreen() {
                     maxLength={10}
                   />
 
+                  <TextInput
+                    style={styles.modalInput}
+                    placeholder="Vehicle Owned *"
+                    value={editVehicleOwned}
+                    onChangeText={setEditVehicleOwned}
+                    autoCapitalize="characters"
+                  />
+
                   <View style={styles.modalButtons}>
                     <Pressable
                       style={[styles.modalButton, styles.cancelButton]}
@@ -544,11 +567,15 @@ export default function DriverManagementScreen() {
               ) : (
                 /* View Mode */
                 <>
-                  {selectedDriver?.photoUrl && selectedDriver.photoUrl.startsWith('data:') && (
+                  {selectedDriver?.photoUrl && selectedDriver.photoUrl.startsWith('data:') ? (
                     <Image
                       source={{ uri: selectedDriver.photoUrl }}
                       style={styles.largePhoto}
                     />
+                  ) : (
+                    <View style={[styles.largePhoto, styles.detailPhotoPlaceholder]}>
+                      <Text style={styles.detailPhotoPlaceholderText}>No Photo</Text>
+                    </View>
                   )}
 
                   <View style={styles.detailRow}>
@@ -567,13 +594,18 @@ export default function DriverManagementScreen() {
                   </View>
 
                   <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>PAN Card:</Text>
+                    <Text style={styles.detailValue}>{selectedDriver?.panCard}</Text>
+                  </View>
+
+                  <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Aadhaar:</Text>
                     <Text style={styles.detailValue}>{selectedDriver?.aadhaarCard}</Text>
                   </View>
 
                   <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>PAN Card:</Text>
-                    <Text style={styles.detailValue}>{selectedDriver?.panCard}</Text>
+                    <Text style={styles.detailLabel}>Vehicle Owned:</Text>
+                    <Text style={styles.detailValue}>{selectedDriver?.vehicleOwned || 'N/A'}</Text>
                   </View>
 
                   <View style={styles.viewModalButtons}>
@@ -620,7 +652,23 @@ const styles = {
     alignItems: 'center' as const,
     marginBottom: 24,
   },
-  backButton: { fontSize: 16, color: '#1d4ed8', fontWeight: '600' as const },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#1d4ed8',
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+  },
+  backButtonIcon: {
+    color: '#fff',
+    fontSize: 30,
+    lineHeight: 32,
+    fontWeight: '600' as const,
+  },
+  headerSpacer: {
+    width: 40,
+  },
   headerTitle: { fontSize: 28, fontWeight: '700' as const, color: '#111827' },
 
   driversList: {
@@ -646,6 +694,7 @@ const styles = {
   driverInfo: { flex: 1 },
   driverName: { fontSize: 16, fontWeight: '600' as const, color: '#111827' },
   driverAge: { fontSize: 14, color: '#6b7280' },
+  driverVehicle: { fontSize: 13, color: '#4b5563', marginTop: 2 },
   driverAddress: { fontSize: 12, color: '#9ca3af' },
   driverId: { fontSize: 12, color: '#9ca3af', marginTop: 2 },
   chevron: { fontSize: 24, color: '#d1d5db' },
@@ -709,6 +758,18 @@ const styles = {
   },
   photoPlaceholderText: { fontSize: 20 },
   largePhoto: { width: '100%' as const, height: 250, borderRadius: 12, marginBottom: 20 },
+  detailPhotoPlaceholder: {
+    backgroundColor: '#f3f4f6',
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+  },
+  detailPhotoPlaceholderText: {
+    color: '#6b7280',
+    fontSize: 16,
+    fontWeight: '600' as const,
+  },
 
   modalInput: {
     borderWidth: 1,

@@ -15,6 +15,7 @@ export interface Driver {
   address: string;
   aadhaarCard: string;
   panCard: string;
+  vehicleOwned: string;
   photoUrl: string;
   userId: string;
   createdAt?: any;
@@ -58,6 +59,7 @@ export const getDrivers = async (userId?: string) => {
         address: data.address || '',
         aadhaarCard: data.aadhaarCard || '',
         panCard: data.panCard || '',
+        vehicleOwned: data.vehicleOwned || '',
         photoUrl: data.photoUrl || '',
         userId: data.userId || '',
         createdAt: data.createdAt,

@@ -208,8 +208,8 @@ export default function UserManagementScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Text style={styles.backButton}>← Back</Text>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+          <Text style={styles.backButtonIcon}>‹</Text>
         </TouchableOpacity>
         <Text style={styles.title}>User Management</Text>
         {isUserAdmin ? (
@@ -426,8 +426,17 @@ const styles = {
     borderBottomColor: '#e5e7eb',
   },
   backButton: {
-    fontSize: 16,
-    color: '#2563eb',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#2563eb',
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+  },
+  backButtonIcon: {
+    color: '#fff',
+    fontSize: 30,
+    lineHeight: 32,
     fontWeight: '600' as const,
   },
   title: {

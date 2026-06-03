@@ -10,8 +10,8 @@ import {
     Pressable,
     KeyboardAvoidingView,
     Platform,
+    ActivityIndicator,
 } from 'react-native';
-import { Picker } from '@react-native-picker/picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { auth } from '../firebaseConfig';
@@ -32,7 +32,6 @@ export default function DashboardScreen() {
     // Add trip modal
     const [addModalVisible, setAddModalVisible] = useState(false);
     const [isUserManager, setIsUserManager] = useState(false);
-    const [isUserAdmin, setIsUserAdmin] = useState(false);
     const [checkingRole, setCheckingRole] = useState(true);
 
     // Add trip form states
@@ -53,10 +52,12 @@ export default function DashboardScreen() {
     const [showArrivalPicker, setShowArrivalPicker] = useState(false);
     const [tempDepartureDate, setTempDepartureDate] = useState(new Date());
     const [tempArrivalDate, setTempArrivalDate] = useState(new Date());
+    const [datePickerContext, setDatePickerContext] = useState<'add' | 'edit'>('add');
 
     // Trips list
     const [trips, setTrips] = useState<(TripFirestore & { id: string })[]>([]);
     const [loading, setLoading] = useState(true);
+    const [drivers, setDrivers] = useState<(Driver & { id: string })[]>([]);
 
     // View/Edit modal
     const [viewModalVisible, setViewModalVisible] = useState(false);
@@ -93,16 +94,10 @@ export default function DashboardScreen() {
         'BR Specialist',
     ];
 
-    // Add these new states for controlling custom input visibility
-    const [showCustomFromAdd, setShowCustomFromAdd] = useState(false);
-    const [showCustomToAdd, setShowCustomToAdd] = useState(false);
-
-    const [showCustomFromEdit, setShowCustomFromEdit] = useState(false);
-    const [showCustomToEdit, setShowCustomToEdit] = useState(false);
-
     // For Add modal
     const [fromSuggestions, setFromSuggestions] = useState<string[]>([]);
     const [toSuggestions, setToSuggestions] = useState<string[]>([]);
+    const [showDriverSuggestions, setShowDriverSuggestions] = useState(false);
 
     // For Edit modal
     const [editFromSuggestions, setEditFromSuggestions] = useState<string[]>([]);
@@ -118,6 +113,7 @@ export default function DashboardScreen() {
 
     useEffect(() => {
         loadTrips();
+        loadDrivers();
         checkUserRole();
     }, []);
 
@@ -129,7 +125,6 @@ export default function DashboardScreen() {
                 console.log('🔍 Role Check:', { manager, admin, uid: user.uid, email: user.email });
                 console.log('👁️ isUserManager will be:', manager || admin);
                 setIsUserManager(manager || admin); // Both managers and admins get access
-                setIsUserAdmin(admin);
             } else {
                 console.log('⚠️ No user UID found');
             }
@@ -151,6 +146,22 @@ export default function DashboardScreen() {
         } finally {
             setLoading(false);
         }
+    };
+
+    const loadDrivers = async () => {
+        try {
+            const fetchedDrivers = await getDrivers();
+            setDrivers(fetchedDrivers);
+        } catch (error) {
+            console.error('Error loading drivers:', error);
+            Alert.alert('Error', 'Failed to load drivers');
+        }
+    };
+
+    const closeAddSuggestions = () => {
+        setFromSuggestions([]);
+        setToSuggestions([]);
+        setShowDriverSuggestions(false);
     };
 
     const handleLogout = () => {
@@ -232,6 +243,22 @@ export default function DashboardScreen() {
         });
     };
 
+    const applyDepartureTime = (date: Date) => {
+        if (datePickerContext === 'edit') {
+            setEditDepartureTime(date);
+        } else {
+            setDepartureTime(date);
+        }
+    };
+
+    const applyArrivalTime = (date: Date) => {
+        if (datePickerContext === 'edit') {
+            setEditArrivalTime(date);
+        } else {
+            setArrivalTime(date);
+        }
+    };
+
     const resetAddForm = () => {
         setVehicleNo('');
         setLrNo('');
@@ -244,6 +271,7 @@ export default function DashboardScreen() {
         setToPlant('');
         setDepartureTime(null);
         setArrivalTime(null);
+        closeAddSuggestions();
     };
 
     const handleAddTrip = async () => {
@@ -412,24 +440,24 @@ export default function DashboardScreen() {
                 {isUserManager && !checkingRole && (
                     <View style={styles.managerButtonsContainer}>
                         <TouchableOpacity
-                            style={styles.adminButton}
+                            style={[styles.managerButton, styles.successButton]}
                             onPress={() => navigation.navigate('DriverManagement')}
                         >
-                            <Text style={styles.adminButtonText}>👥 Manage Drivers</Text>
+                            <Text style={styles.managerButtonText}>Manage Drivers</Text>
                         </TouchableOpacity>
 
                         <TouchableOpacity
-                            style={[styles.adminButton, { backgroundColor: '#dc2626' }]}
+                            style={[styles.managerButton, styles.dangerButton]}
                             onPress={() => navigation.navigate('UserManagement')}
                         >
-                            <Text style={styles.adminButtonText}>👤 Manage Users</Text>
+                            <Text style={styles.managerButtonText}>Manage Users</Text>
                         </TouchableOpacity>
 
                         <TouchableOpacity
-                            style={styles.addDriverButton}
+                            style={[styles.managerButton, styles.primaryButton]}
                             onPress={() => navigation.navigate('DriverManagement')}
                         >
-                            <Text style={styles.addDriverButtonText}>➕ Add Driver</Text>
+                            <Text style={styles.managerButtonText}>Add Driver</Text>
                         </TouchableOpacity>
                     </View>
                 )}
@@ -453,7 +481,10 @@ export default function DashboardScreen() {
                 <Text style={styles.sectionTitle}>Recent Trips</Text>
                 <View style={styles.activityList}>
                     {loading ? (
-                        <Text style={styles.emptyText}>Loading...</Text>
+                        <View style={styles.loadingState}>
+                            <ActivityIndicator size="small" color="#1d4ed8" />
+                            <Text style={styles.loadingText}>Loading trips...</Text>
+                        </View>
                     ) : trips.length === 0 ? (
                         <Text style={styles.emptyText}>No trips yet</Text>
                     ) : (
@@ -463,7 +494,12 @@ export default function DashboardScreen() {
                                 style={styles.activityItem}
                                 onPress={() => handleTripPress(trip)}
                             >
-                                <View style={styles.activityDot} />
+                                <View
+                                    style={[
+                                        styles.activityDot,
+                                        trip.arrivalTime ? styles.deliveredDot : styles.activeDot,
+                                    ]}
+                                />
 
                                 <View style={styles.activityContent}>
                                     {/* Row 1: Vehicle + Driver */}
@@ -497,7 +533,14 @@ export default function DashboardScreen() {
             </ScrollView>
 
             {/* Floating Action Button */}
-            <TouchableOpacity style={styles.fab} onPress={() => setAddModalVisible(true)}>
+            <TouchableOpacity
+                style={styles.fab}
+                onPress={() => {
+                    closeAddSuggestions();
+                    loadDrivers();
+                    setAddModalVisible(true);
+                }}
+            >
                 <Text style={styles.fabText}>+</Text>
             </TouchableOpacity>
 
@@ -581,6 +624,7 @@ export default function DashboardScreen() {
                                     placeholder="Vehicle Number *"
                                     value={vehicleNo}
                                     onChangeText={setVehicleNo}
+                                    onFocus={closeAddSuggestions}
                                     autoCapitalize="characters"
                                 />
                                 <TextInput
@@ -588,23 +632,63 @@ export default function DashboardScreen() {
                                     placeholder="LR No *"
                                     value={lrNo}
                                     onChangeText={setLrNo}
+                                    onFocus={closeAddSuggestions}
                                 />
                             </View>
 
                             {/* Row 2 */}
-                            <View style={styles.twoColumnRow}>
-                                <TextInput
-                                    style={styles.halfInput}
-                                    placeholder="Driver Name *"
-                                    value={driverName}
-                                    onChangeText={setDriverName}
-                                    autoCapitalize="words"
-                                />
+                            <View style={[styles.twoColumnRow, styles.driverSuggestionsRow]}>
+                                <View style={[styles.inputWithSuggestions, styles.halfField, styles.driverSelectorField]}>
+                                    <TouchableOpacity
+                                        style={[styles.halfInput, styles.selectInput]}
+                                        activeOpacity={0.8}
+                                        onPress={() => {
+                                            setShowDriverSuggestions(true);
+                                            setFromSuggestions([]);
+                                            setToSuggestions([]);
+                                        }}
+                                    >
+                                        <Text style={driverName ? styles.selectText : styles.selectPlaceholder}>
+                                            {driverName || 'Driver Name *'}
+                                        </Text>
+                                    </TouchableOpacity>
+                                    {showDriverSuggestions && (
+                                        <View style={styles.suggestionsContainer}>
+                                            <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled">
+                                                {drivers.length === 0 ? (
+                                                    <View style={styles.suggestionItem}>
+                                                        <Text style={styles.emptySuggestionText}>No drivers added</Text>
+                                                    </View>
+                                                ) : (
+                                                    drivers.map((driver, index) => (
+                                                        <TouchableOpacity
+                                                            key={driver.id}
+                                                            style={[
+                                                                styles.suggestionItem,
+                                                                index === drivers.length - 1 && styles.suggestionItemLast,
+                                                            ]}
+                                                            onPress={() => {
+                                                                setDriverName(driver.fullName);
+                                                                setShowDriverSuggestions(false);
+                                                            }}
+                                                        >
+                                                            <Text style={styles.suggestionText}>{driver.fullName}</Text>
+                                                            <Text style={styles.suggestionMetaText}>
+                                                                {driver.vehicleOwned || 'No vehicle assigned'}
+                                                            </Text>
+                                                        </TouchableOpacity>
+                                                    ))
+                                                )}
+                                            </ScrollView>
+                                        </View>
+                                    )}
+                                </View>
                                 <TextInput
                                     style={styles.halfInput}
                                     placeholder="Company Name *"
                                     value={companyName}
                                     onChangeText={setCompanyName}
+                                    onFocus={closeAddSuggestions}
                                 />
                             </View>
 
@@ -615,12 +699,14 @@ export default function DashboardScreen() {
                                     placeholder="Item Type *"
                                     value={itemType}
                                     onChangeText={setItemType}
+                                    onFocus={closeAddSuggestions}
                                 />
                                 <TextInput
                                     style={styles.halfInput}
                                     placeholder="Quantity (tons) *"
                                     value={quantity}
                                     onChangeText={setQuantity}
+                                    onFocus={closeAddSuggestions}
                                     keyboardType="numeric"
                                 />
                             </View>
@@ -628,16 +714,21 @@ export default function DashboardScreen() {
                             {/* Plants - Dropdown + Custom input */}
                             {/* Plants - Autocomplete TextInput */}
                             {/* Plants - Autocomplete */}
-                            <View style={styles.twoColumnRow}>
+                            <View style={[styles.twoColumnRow, styles.plantSuggestionsRow]}>
                                 {/* From Plant */}
-                                <View style={[styles.inputWithSuggestions, { flex: 1, marginHorizontal: 4 }]}>
+                                <View style={[styles.inputWithSuggestions, styles.halfField]}>
                                     <TextInput
-                                        style={styles.halfInput}
-                                        placeholder="From Plant..."
+                                        style={[styles.halfInput, styles.inputInsideSuggestion]}
+                                        placeholder="From Plant *"
                                         value={fromPlant}
+                                        onFocus={() => {
+                                            setFromSuggestions(predefinedPlants);
+                                            setToSuggestions([]);
+                                            setShowDriverSuggestions(false);
+                                        }}
                                         onChangeText={(text) => {
                                             setFromPlant(text);
-                                            setFromSuggestions(text.trim() ? getSuggestions(text) : []);
+                                            setFromSuggestions(text.trim() ? getSuggestions(text) : predefinedPlants);
                                         }}
                                         autoCapitalize="words"
                                     />
@@ -654,6 +745,7 @@ export default function DashboardScreen() {
                                                         onPress={() => {
                                                             setFromPlant(plant);
                                                             setFromSuggestions([]);
+                                                            setShowDriverSuggestions(false);
                                                         }}
                                                     >
                                                         <Text style={styles.suggestionText}>{plant}</Text>
@@ -665,14 +757,19 @@ export default function DashboardScreen() {
                                 </View>
 
                                 {/* To Plant */}
-                                <View style={[styles.inputWithSuggestions, { flex: 1, marginHorizontal: 4 }]}>
+                                <View style={[styles.inputWithSuggestions, styles.halfField]}>
                                     <TextInput
-                                        style={styles.halfInput}
-                                        placeholder="To plant..."
+                                        style={[styles.halfInput, styles.inputInsideSuggestion]}
+                                        placeholder="To Plant *"
                                         value={toPlant}
+                                        onFocus={() => {
+                                            setToSuggestions(predefinedPlants);
+                                            setFromSuggestions([]);
+                                            setShowDriverSuggestions(false);
+                                        }}
                                         onChangeText={(text) => {
                                             setToPlant(text);
-                                            setToSuggestions(text.trim() ? getSuggestions(text) : []);
+                                            setToSuggestions(text.trim() ? getSuggestions(text) : predefinedPlants);
                                         }}
                                         autoCapitalize="words"
                                     />
@@ -689,6 +786,7 @@ export default function DashboardScreen() {
                                                         onPress={() => {
                                                             setToPlant(plant);
                                                             setToSuggestions([]);
+                                                            setShowDriverSuggestions(false);
                                                         }}
                                                     >
                                                         <Text style={styles.suggestionText}>{plant}</Text>
@@ -705,7 +803,9 @@ export default function DashboardScreen() {
                                 <TouchableOpacity
                                     style={styles.halfDateButton}
                                     onPress={() => {
+                                        closeAddSuggestions();
                                         setTempDepartureDate(departureTime || new Date());
+                                        setDatePickerContext('add');
                                         setShowDeparturePicker(true);
                                     }}
                                 >
@@ -717,7 +817,9 @@ export default function DashboardScreen() {
                                 <TouchableOpacity
                                     style={styles.halfDateButton}
                                     onPress={() => {
+                                        closeAddSuggestions();
                                         setTempArrivalDate(arrivalTime || new Date());
+                                        setDatePickerContext('add');
                                         setShowArrivalPicker(true);
                                     }}
                                 >
@@ -733,6 +835,7 @@ export default function DashboardScreen() {
                                 placeholder="Fuel Filled (liters)"
                                 value={fuelFilled}
                                 onChangeText={setFuelFilled}
+                                onFocus={closeAddSuggestions}
                                 keyboardType="numeric"
                             />
 
@@ -746,15 +849,23 @@ export default function DashboardScreen() {
                                                 mode="datetime"
                                                 display="spinner"
                                                 onChange={(e, date) => {
-                                                    if (Platform.OS === 'android') setShowDeparturePicker(false);
-                                                    if (date) setTempDepartureDate(date);
+                                                    if (!date) {
+                                                        if (Platform.OS === 'android') setShowDeparturePicker(false);
+                                                        return;
+                                                    }
+
+                                                    setTempDepartureDate(date);
+                                                    if (Platform.OS === 'android') {
+                                                        applyDepartureTime(date);
+                                                        setShowDeparturePicker(false);
+                                                    }
                                                 }}
                                             />
                                             {Platform.OS === 'ios' && (
                                                 <Pressable
                                                     style={pickerModalStyles.doneButton}
                                                     onPress={() => {
-                                                        setDepartureTime(tempDepartureDate);
+                                                        applyDepartureTime(tempDepartureDate);
                                                         setShowDeparturePicker(false);
                                                     }}
                                                 >
@@ -775,15 +886,23 @@ export default function DashboardScreen() {
                                                 mode="datetime"
                                                 display="spinner"
                                                 onChange={(e, date) => {
-                                                    if (Platform.OS === 'android') setShowArrivalPicker(false);
-                                                    if (date) setTempArrivalDate(date);
+                                                    if (!date) {
+                                                        if (Platform.OS === 'android') setShowArrivalPicker(false);
+                                                        return;
+                                                    }
+
+                                                    setTempArrivalDate(date);
+                                                    if (Platform.OS === 'android') {
+                                                        applyArrivalTime(date);
+                                                        setShowArrivalPicker(false);
+                                                    }
                                                 }}
                                             />
                                             {Platform.OS === 'ios' && (
                                                 <Pressable
                                                     style={pickerModalStyles.doneButton}
                                                     onPress={() => {
-                                                        setArrivalTime(tempArrivalDate);
+                                                        applyArrivalTime(tempArrivalDate);
                                                         setShowArrivalPicker(false);
                                                     }}
                                                 >
@@ -887,10 +1006,10 @@ export default function DashboardScreen() {
                                     {/* Plants - Edit */}
                                     <View style={styles.twoColumnRow}>
                                         {/* From Plant Edit */}
-                                        <View style={[styles.inputWithSuggestions, { flex: 1, marginHorizontal: 4 }]}>
+                                        <View style={[styles.inputWithSuggestions, styles.halfField]}>
                                             <TextInput
-                                                style={styles.halfInput}
-                                                placeholder="Type plant name..."
+                                                style={[styles.halfInput, styles.inputInsideSuggestion]}
+                                                placeholder="From Plant *"
                                                 value={editFromPlant}
                                                 onChangeText={(text) => {
                                                     setEditFromPlant(text);
@@ -922,10 +1041,10 @@ export default function DashboardScreen() {
                                         </View>
 
                                         {/* To Plant Edit */}
-                                        <View style={[styles.inputWithSuggestions, { flex: 1, marginHorizontal: 4 }]}>
+                                        <View style={[styles.inputWithSuggestions, styles.halfField]}>
                                             <TextInput
-                                                style={styles.halfInput}
-                                                placeholder="To plant..."
+                                                style={[styles.halfInput, styles.inputInsideSuggestion]}
+                                                placeholder="To Plant *"
                                                 value={editToPlant}
                                                 onChangeText={(text) => {
                                                     setEditToPlant(text);
@@ -962,6 +1081,7 @@ export default function DashboardScreen() {
                                             style={styles.halfDateButton}
                                             onPress={() => {
                                                 setTempDepartureDate(editDepartureTime || new Date());
+                                                setDatePickerContext('edit');
                                                 setShowDeparturePicker(true);
                                             }}
                                         >
@@ -974,6 +1094,7 @@ export default function DashboardScreen() {
                                             style={styles.halfDateButton}
                                             onPress={() => {
                                                 setTempArrivalDate(editArrivalTime || new Date());
+                                                setDatePickerContext('edit');
                                                 setShowArrivalPicker(true);
                                             }}
                                         >
@@ -1001,15 +1122,23 @@ export default function DashboardScreen() {
                                                         mode="datetime"
                                                         display="spinner"
                                                         onChange={(e, date) => {
-                                                            if (Platform.OS === 'android') setShowDeparturePicker(false);
-                                                            if (date) setTempDepartureDate(date);
+                                                            if (!date) {
+                                                                if (Platform.OS === 'android') setShowDeparturePicker(false);
+                                                                return;
+                                                            }
+
+                                                            setTempDepartureDate(date);
+                                                            if (Platform.OS === 'android') {
+                                                                applyDepartureTime(date);
+                                                                setShowDeparturePicker(false);
+                                                            }
                                                         }}
                                                     />
                                                     {Platform.OS === 'ios' && (
                                                         <Pressable
                                                             style={pickerModalStyles.doneButton}
                                                             onPress={() => {
-                                                                setEditDepartureTime(tempDepartureDate);
+                                                                applyDepartureTime(tempDepartureDate);
                                                                 setShowDeparturePicker(false);
                                                             }}
                                                         >
@@ -1030,15 +1159,23 @@ export default function DashboardScreen() {
                                                         mode="datetime"
                                                         display="spinner"
                                                         onChange={(e, date) => {
-                                                            if (Platform.OS === 'android') setShowArrivalPicker(false);
-                                                            if (date) setTempArrivalDate(date);
+                                                            if (!date) {
+                                                                if (Platform.OS === 'android') setShowArrivalPicker(false);
+                                                                return;
+                                                            }
+
+                                                            setTempArrivalDate(date);
+                                                            if (Platform.OS === 'android') {
+                                                                applyArrivalTime(date);
+                                                                setShowArrivalPicker(false);
+                                                            }
                                                         }}
                                                     />
                                                     {Platform.OS === 'ios' && (
                                                         <Pressable
                                                             style={pickerModalStyles.doneButton}
                                                             onPress={() => {
-                                                                setEditArrivalTime(tempArrivalDate);
+                                                                applyArrivalTime(tempArrivalDate);
                                                                 setShowArrivalPicker(false);
                                                             }}
                                                         >
@@ -1252,7 +1389,7 @@ const styles = {
         backgroundColor: '#fff',
         width: '48%' as const,
         padding: 20,
-        borderRadius: 12,
+        borderRadius: 8,
         marginBottom: 16,
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
@@ -1271,7 +1408,7 @@ const styles = {
     },
     activityList: {
         backgroundColor: '#fff',
-        borderRadius: 12,
+        borderRadius: 8,
         padding: 16,
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
@@ -1285,41 +1422,31 @@ const styles = {
         gap: 12,
         marginBottom: 20,
     },
-    adminButton: {
+    managerButton: {
         flex: 1,
         minWidth: 150,
+        borderRadius: 8,
+        paddingVertical: 12,
+        alignItems: 'center' as const,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 3,
+    },
+    primaryButton: {
+        backgroundColor: '#1d4ed8',
+    },
+    successButton: {
         backgroundColor: '#10b981',
-        borderRadius: 10,
-        paddingVertical: 14,
-        alignItems: 'center' as const,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
     },
-    adminButtonText: {
+    dangerButton: {
+        backgroundColor: '#dc2626',
+    },
+    managerButtonText: {
         color: '#fff',
         fontSize: 14,
-        fontWeight: '700' as const,
-    },
-    addDriverButton: {
-        flex: 1,
-        minWidth: 150,
-        backgroundColor: '#3b82f6',
-        borderRadius: 10,
-        paddingVertical: 14,
-        alignItems: 'center' as const,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
-    },
-    addDriverButtonText: {
-        color: '#fff',
-        fontSize: 14,
-        fontWeight: '700' as const,
+        fontWeight: '600' as const,
     },
     activityItem: {
         flexDirection: 'row' as const,
@@ -1330,35 +1457,59 @@ const styles = {
     inputWithSuggestions: {
         position: 'relative' as const,
     },
+    halfField: {
+        flex: 1,
+        minWidth: 0,
+    },
+    inputInsideSuggestion: {
+        width: '100%' as const,
+        flex: 0,
+    },
+    driverSelectorField: {
+        zIndex: 600,
+        elevation: 12,
+    },
+    selectInput: {
+        width: '100%' as const,
+        flex: 0,
+        justifyContent: 'center' as const,
+    },
+    selectText: {
+        color: '#111827',
+        fontSize: 15,
+    },
+    selectPlaceholder: {
+        color: '#9ca3af',
+        fontSize: 15,
+    },
     activityDot: {
         width: 10,
         height: 10,
         borderRadius: 5,
-        backgroundColor: '#1d4ed8',
         marginRight: 14,
         marginTop: 10,
     },
+    activeDot: {
+        backgroundColor: '#1d4ed8',
+    },
+    deliveredDot: {
+        backgroundColor: '#10b981',
+    },
     activityContent: {
         flex: 1,
-    },
-    tripHeader: {
-        flexDirection: 'row' as const,
-        justifyContent: 'space-between' as const,
-        alignItems: 'center' as const,
-        marginBottom: 4,
     },
     suggestionsContainer: {
         position: 'absolute' as const,
         top: 52,
         left: 0,
         right: 0,
-        zIndex: 100,
+        zIndex: 700,
         backgroundColor: '#ffffff',
         borderWidth: 1,
         borderColor: '#d1d5db',
-        borderRadius: 10,
+        borderRadius: 8,
         maxHeight: 200,
-        elevation: 6,
+        elevation: 12,
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.15,
@@ -1377,6 +1528,16 @@ const styles = {
         fontSize: 15,
         color: '#111827',
     },
+    suggestionMetaText: {
+        color: '#6b7280',
+        fontSize: 12,
+        marginTop: 2,
+    },
+    emptySuggestionText: {
+        color: '#9ca3af',
+        fontSize: 14,
+        textAlign: 'center' as const,
+    },
     tripMainText: {
         fontSize: 16,
         fontWeight: '600' as const,
@@ -1388,7 +1549,6 @@ const styles = {
         fontWeight: '500' as const,
         color: '#4b5563',
     },
-    truckName: { fontSize: 16, fontWeight: '600' as const, color: '#111827', flex: 1 },
     routeText: {
         fontSize: 14,
         color: '#1d4ed8',
@@ -1399,7 +1559,6 @@ const styles = {
         fontSize: 13,
         color: '#6b7280',
     },
-    statusText: { fontSize: 13, color: '#6b7280' },
     fab: {
         position: 'absolute' as const,
         right: 20,
@@ -1423,7 +1582,7 @@ const styles = {
         backgroundColor: '#fff',
         width: '92%' as const,
         maxHeight: '88%' as const,
-        borderRadius: 16,
+        borderRadius: 12,
         padding: 20,
     },
     modalTitle: {
@@ -1435,11 +1594,20 @@ const styles = {
     },
     twoColumnRow: {
         flexDirection: 'row' as const,
-        justifyContent: 'space-between' as const,
+        gap: 10,
         marginBottom: 14,
+    },
+    driverSuggestionsRow: {
+        zIndex: 500,
+        elevation: 10,
+    },
+    plantSuggestionsRow: {
+        zIndex: 100,
+        elevation: 4,
     },
     halfInput: {
         flex: 1,
+        minWidth: 0,
         borderWidth: 1,
         borderColor: '#d1d5db',
         borderRadius: 8,
@@ -1447,17 +1615,16 @@ const styles = {
         paddingVertical: 12,
         fontSize: 15,
         backgroundColor: '#f9fafb',
-        marginHorizontal: 4,
     },
     halfDateButton: {
         flex: 1,
+        minWidth: 0,
         borderWidth: 1,
         borderColor: '#d1d5db',
         borderRadius: 8,
         paddingHorizontal: 12,
         paddingVertical: 14,
         backgroundColor: '#f9fafb',
-        marginHorizontal: 4,
         justifyContent: 'center' as const,
     },
     modalInput: {
@@ -1531,6 +1698,16 @@ const styles = {
         fontSize: 16,
         padding: 40,
     },
+    loadingState: {
+        alignItems: 'center' as const,
+        justifyContent: 'center' as const,
+        padding: 40,
+        gap: 10,
+    },
+    loadingText: {
+        color: '#6b7280',
+        fontSize: 14,
+    },
 };
 
 const pickerModalStyles = {
@@ -1556,23 +1733,5 @@ const pickerModalStyles = {
         fontSize: 18,
         color: '#007AFF',
         fontWeight: '600' as const,
-    },
-    fieldLabel: {
-        fontSize: 14,
-        fontWeight: '500' as const,
-        color: '#374151',
-        marginBottom: 6,
-    },
-    pickerWrapper: {
-        borderWidth: 1,
-        borderColor: '#d1d5db',
-        borderRadius: 8,
-        backgroundColor: '#f9fafb',
-        overflow: 'hidden' as const,
-    },
-    picker: {
-        height: 50,
-        width: '100%' as const,
-        color: '#111827',
     },
 };

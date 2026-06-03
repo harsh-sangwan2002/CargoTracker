@@ -12,7 +12,7 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
-import * as FileSystem from 'expo-file-system';
+import { File } from 'expo-file-system';
 
 export interface UserProfile {
   uid: string;
@@ -98,10 +98,16 @@ export const convertImageToBase64 = async (imageUri: string): Promise<string> =>
       return imageUri;
     }
 
+<<<<<<< HEAD
     // Read file and convert to base64
     const base64 = await FileSystem.readAsStringAsync(imageUri, {
       encoding: 'base64' as any,
     });
+=======
+    // Read file and convert to base64 using the Expo SDK 54 File API.
+    const imageFile = new File(imageUri);
+    const base64 = await imageFile.base64();
+>>>>>>> 0dd83a5 (Fixed UI and sanitized driver's data field)
 
     // Determine image type
     const imageType = imageUri.toLowerCase().endsWith('.png') ? 'png' : 'jpeg';
