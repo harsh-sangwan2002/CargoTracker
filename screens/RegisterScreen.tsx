@@ -1,192 +1,275 @@
 import React, { useState } from 'react';
 import {
-    View,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    Alert,
-    ActivityIndicator,
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  Alert,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
 } from 'react-native';
-import StyleSheet from '../utils/styleShim';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { auth } from '../firebaseConfig';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { useNavigation } from '@react-navigation/native';
+import { auth } from '../firebaseConfig';
 import { createUserProfile } from '../services/userService';
+import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
 
 export default function RegisterScreen() {
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [confirmPassword, setConfirmPassword] = useState('');
-    const [loading, setLoading] = useState(false);
-    const navigation = useNavigation<any>();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [focused, setFocused] = useState<string | null>(null);
+  const navigation = useNavigation<any>();
 
-    const handleRegister = async () => {
-        if (!email || !password || !confirmPassword) {
-            Alert.alert('Error', 'Please fill all fields');
-            return;
-        }
-        if (password !== confirmPassword) {
-            Alert.alert('Error', 'Passwords do not match');
-            return;
-        }
+  const handleRegister = async () => {
+    if (!email.trim() || !password || !confirmPassword) {
+      Alert.alert('Required', 'Please fill in all fields.');
+      return;
+    }
+    if (password !== confirmPassword) {
+      Alert.alert('Mismatch', 'Passwords do not match.');
+      return;
+    }
+    if (password.length < 6) {
+      Alert.alert('Weak Password', 'Password must be at least 6 characters.');
+      return;
+    }
+    setLoading(true);
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
+      await createUserProfile(cred.user.uid, email.trim(), 'driver');
+      Alert.alert('Account created', 'You have been registered as a driver. An admin can update your role if needed.');
+    } catch (err: any) {
+      const map: Record<string, string> = {
+        'auth/email-already-in-use': 'This email is already registered.',
+        'auth/invalid-email': 'Please enter a valid email address.',
+        'auth/weak-password': 'Password must be at least 6 characters.',
+      };
+      Alert.alert('Registration Failed', map[err.code] ?? err.message ?? 'Something went wrong.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-        setLoading(true);
-        try {
-            const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+  const inputStyle = (name: string) => [
+    s.input,
+    focused === name && s.inputFocused,
+  ];
 
-            await createUserProfile(userCredential.user.uid, email, 'driver');
-
-            Alert.alert('Success ✓', 'Account created successfully!');
-            navigation.replace('Login');
-        } catch (err: any) {
-            let message = 'Registration failed. Please try again.';
-            if (err.code === 'auth/email-already-in-use') {
-                message = 'This email is already registered.';
-            } else if (err.code === 'auth/invalid-email') {
-                message = 'Please enter a valid email address.';
-            } else if (err.code === 'auth/weak-password') {
-                message = 'Password should be at least 6 characters.';
-            }
-            Alert.alert('Registration Failed', message);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    return (
-        <SafeAreaView style={styles.container}>
-            <View style={styles.content}>
-                <Text style={styles.title}>Create Account</Text>
-                <Text style={styles.subtitle}>Cargo Tracker</Text>
-
-                <View style={styles.form}>
-                    <TextInput
-                        style={styles.input}
-                        placeholder="Email"
-                        value={email}
-                        onChangeText={setEmail}
-                        autoCapitalize="none"
-                        keyboardType="email-address"
-                        editable={!loading}
-                    />
-                    <TextInput
-                        style={styles.input}
-                        placeholder="Password"
-                        value={password}
-                        onChangeText={setPassword}
-                        secureTextEntry
-                        editable={!loading}
-                    />
-                    <TextInput
-                        style={styles.input}
-                        placeholder="Confirm Password"
-                        value={confirmPassword}
-                        onChangeText={setConfirmPassword}
-                        secureTextEntry
-                        editable={!loading}
-                    />
-
-                    <TouchableOpacity
-                        style={[styles.button, loading && styles.buttonDisabled]}
-                        onPress={handleRegister}
-                        disabled={loading}
-                    >
-                        {loading ? (
-                            <ActivityIndicator color="#fff" />
-                        ) : (
-                            <Text style={styles.buttonText}>Register</Text>
-                        )}
-                    </TouchableOpacity>
-
-                    {/* Beautiful centered "Login" link */}
-                    <TouchableOpacity
-                        onPress={() => navigation.navigate('Login')}
-                        style={styles.registerLinkContainer}
-                    >
-                        <Text style={styles.registerLinkText}>
-                            Already have an account?{' '}
-                            <Text style={styles.registerHighlight}>Login</Text>
-                        </Text>
-                    </TouchableOpacity>
-                </View>
-
-                <Text style={styles.hint}>Powered by Firebase Authentication</Text>
+  return (
+    <SafeAreaView style={s.safe}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <ScrollView
+          contentContainerStyle={s.scroll}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={s.brandContainer}>
+            <View style={s.logoBox}>
+              <Text style={s.logoText}>CT</Text>
             </View>
-        </SafeAreaView>
-    );
+            <Text style={s.appName}>Cargo Tracker</Text>
+            <Text style={s.tagline}>Create your account</Text>
+          </View>
+
+          <View style={s.card}>
+            <Text style={s.cardTitle}>Get started</Text>
+            <Text style={s.cardSub}>New accounts are assigned the Driver role by default.</Text>
+
+            <View style={s.field}>
+              <Text style={s.label}>Email address</Text>
+              <TextInput
+                style={inputStyle('email')}
+                placeholder="you@example.com"
+                placeholderTextColor={Colors.textMuted}
+                value={email}
+                onChangeText={setEmail}
+                autoCapitalize="none"
+                keyboardType="email-address"
+                editable={!loading}
+                onFocus={() => setFocused('email')}
+                onBlur={() => setFocused(null)}
+                returnKeyType="next"
+              />
+            </View>
+
+            <View style={s.field}>
+              <Text style={s.label}>Password</Text>
+              <TextInput
+                style={inputStyle('pass')}
+                placeholder="Min 6 characters"
+                placeholderTextColor={Colors.textMuted}
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry
+                editable={!loading}
+                onFocus={() => setFocused('pass')}
+                onBlur={() => setFocused(null)}
+                returnKeyType="next"
+              />
+            </View>
+
+            <View style={s.field}>
+              <Text style={s.label}>Confirm password</Text>
+              <TextInput
+                style={inputStyle('confirm')}
+                placeholder="Re-enter password"
+                placeholderTextColor={Colors.textMuted}
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+                secureTextEntry
+                editable={!loading}
+                onFocus={() => setFocused('confirm')}
+                onBlur={() => setFocused(null)}
+                returnKeyType="done"
+                onSubmitEditing={handleRegister}
+              />
+            </View>
+
+            <TouchableOpacity
+              style={[s.btn, loading && s.btnDisabled]}
+              onPress={handleRegister}
+              disabled={loading}
+              activeOpacity={0.85}
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={s.btnText}>Create Account</Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={s.linkRow}
+              onPress={() => navigation.goBack()}
+              activeOpacity={0.7}
+            >
+              <Text style={s.linkText}>
+                Already have an account?{'  '}
+                <Text style={s.linkHighlight}>Sign in</Text>
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
 }
 
-const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#fff',
-    },
-    content: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        paddingHorizontal: 20,
-    },
-    title: {
-        fontSize: 32,
-        fontWeight: 'bold',
-        color: '#1d4ed8',
-        marginBottom: 8,
-    },
-    subtitle: {
-        fontSize: 14,
-        color: '#6b7280',
-        marginBottom: 40,
-    },
-    form: {
-        width: '100%',
-        maxWidth: 400,
-    },
-    input: {
-        borderWidth: 1,
-        borderColor: '#e5e7eb',
-        borderRadius: 8,
-        paddingHorizontal: 12,
-        paddingVertical: 12,
-        marginBottom: 16,
-        fontSize: 16,
-        backgroundColor: '#f9fafb',
-    },
-    button: {
-        backgroundColor: '#1d4ed8',
-        borderRadius: 8,
-        paddingVertical: 14,
-        alignItems: 'center' as const,
-        marginTop: 8,
-    },
-    buttonDisabled: {
-        opacity: 0.6,
-    },
-    buttonText: {
-        color: '#fff',
-        fontSize: 16,
-        fontWeight: 'bold',
-    },
-    // Centered & styled link (same as Login screen)
-    registerLinkContainer: {
-        marginTop: 24,
-        alignItems: 'center',
-    },
-    registerLinkText: {
-        fontSize: 15,
-        color: '#4b5563',
-        textAlign: 'center',
-    },
-    registerHighlight: {
-        color: '#1d4ed8',
-        fontWeight: '600',
-        textDecorationLine: 'underline',
-    },
-
-    hint: {
-        fontSize: 12,
-        color: '#6b7280',
-        marginTop: 20,
-    },
-});
+const s = {
+  safe: { flex: 1, backgroundColor: Colors.background } as const,
+  scroll: {
+    flexGrow: 1,
+    justifyContent: 'center' as const,
+    paddingHorizontal: Spacing[5],
+    paddingVertical: Spacing[8],
+  },
+  brandContainer: {
+    alignItems: 'center' as const,
+    marginBottom: Spacing[8],
+  },
+  logoBox: {
+    width: 64,
+    height: 64,
+    borderRadius: Radius.lg,
+    backgroundColor: Colors.primary,
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+    marginBottom: Spacing[3],
+    ...Shadow.md,
+  },
+  logoText: {
+    color: '#fff',
+    fontSize: FontSize['2xl'],
+    fontWeight: '800' as const,
+    letterSpacing: 1,
+  },
+  appName: {
+    fontSize: FontSize['3xl'],
+    fontWeight: '700' as const,
+    color: Colors.text,
+    letterSpacing: -0.5,
+  },
+  tagline: {
+    fontSize: FontSize.sm,
+    color: Colors.textMuted,
+    marginTop: Spacing[1],
+  },
+  card: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.xl,
+    padding: Spacing[6],
+    ...Shadow.lg,
+  },
+  cardTitle: {
+    fontSize: FontSize.xl,
+    fontWeight: '700' as const,
+    color: Colors.text,
+    marginBottom: Spacing[1],
+  },
+  cardSub: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+    marginBottom: Spacing[6],
+    lineHeight: 20,
+  },
+  field: {
+    marginBottom: Spacing[4],
+  },
+  label: {
+    fontSize: FontSize.sm,
+    fontWeight: '600' as const,
+    color: Colors.textSecondary,
+    marginBottom: Spacing[2],
+  },
+  input: {
+    backgroundColor: Colors.surfaceAlt,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing[4],
+    paddingVertical: 14,
+    fontSize: FontSize.base,
+    color: Colors.text,
+  },
+  inputFocused: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primaryLight,
+  },
+  btn: {
+    backgroundColor: Colors.primary,
+    borderRadius: Radius.md,
+    paddingVertical: 16,
+    alignItems: 'center' as const,
+    marginTop: Spacing[2],
+    ...Shadow.md,
+  },
+  btnDisabled: {
+    backgroundColor: Colors.disabled,
+  },
+  btnText: {
+    color: '#fff',
+    fontSize: FontSize.base,
+    fontWeight: '700' as const,
+    letterSpacing: 0.3,
+  },
+  linkRow: {
+    alignItems: 'center' as const,
+    marginTop: Spacing[5],
+  },
+  linkText: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+  },
+  linkHighlight: {
+    color: Colors.primary,
+    fontWeight: '700' as const,
+  },
+};

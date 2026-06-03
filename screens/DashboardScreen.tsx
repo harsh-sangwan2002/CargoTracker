@@ -1,1737 +1,338 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
-    View,
-    Text,
-    TouchableOpacity,
-    ScrollView,
-    Alert,
-    Modal,
-    TextInput,
-    Pressable,
-    KeyboardAvoidingView,
-    Platform,
-    ActivityIndicator,
+  View,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  Animated,
+  RefreshControl,
 } from 'react-native';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { auth } from '../firebaseConfig';
-import {
-    signOut,
-    EmailAuthProvider,
-    reauthenticateWithCredential,
-    deleteUser,
-} from 'firebase/auth';
-import { useNavigation } from '@react-navigation/native';
-import { getTrips, addTrip, TripFirestore, updateTrip, deleteTrip } from '../services/tripService';
-import { deleteUserAccountData, isManager, isAdmin } from '../services/userService';
-
-export default function DashboardScreen() {
-    const navigation = useNavigation<any>();
-    const user = auth.currentUser;
-
-    // Add trip modal
-    const [addModalVisible, setAddModalVisible] = useState(false);
-    const [isUserManager, setIsUserManager] = useState(false);
-    const [checkingRole, setCheckingRole] = useState(true);
-
-    // Add trip form states
-    const [vehicleNo, setVehicleNo] = useState('');
-    const [lrNo, setLrNo] = useState('');
-    const [driverName, setDriverName] = useState('');
-    const [companyName, setCompanyName] = useState('');
-    const [itemType, setItemType] = useState('');
-    const [quantity, setQuantity] = useState('');
-    const [fuelFilled, setFuelFilled] = useState('');
-    const [fromPlant, setFromPlant] = useState('');
-    const [toPlant, setToPlant] = useState('');
-    const [departureTime, setDepartureTime] = useState<Date | null>(null);
-    const [arrivalTime, setArrivalTime] = useState<Date | null>(null);
-
-    // Date picker states
-    const [showDeparturePicker, setShowDeparturePicker] = useState(false);
-    const [showArrivalPicker, setShowArrivalPicker] = useState(false);
-    const [tempDepartureDate, setTempDepartureDate] = useState(new Date());
-    const [tempArrivalDate, setTempArrivalDate] = useState(new Date());
-    const [datePickerContext, setDatePickerContext] = useState<'add' | 'edit'>('add');
-
-    // Trips list
-    const [trips, setTrips] = useState<(TripFirestore & { id: string })[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [drivers, setDrivers] = useState<(Driver & { id: string })[]>([]);
-
-    // View/Edit modal
-    const [viewModalVisible, setViewModalVisible] = useState(false);
-    const [selectedTrip, setSelectedTrip] = useState<(TripFirestore & { id: string }) | null>(null);
-    const [isEditing, setIsEditing] = useState(false);
-
-    // Account deletion
-    const [deleteAccountModalVisible, setDeleteAccountModalVisible] = useState(false);
-    const [deleteAccountPassword, setDeleteAccountPassword] = useState('');
-    const [deletingAccount, setDeletingAccount] = useState(false);
-
-    // Edit form states
-    const [editVehicleNo, setEditVehicleNo] = useState('');
-    const [editLrNo, setEditLrNo] = useState('');
-    const [editDriverName, setEditDriverName] = useState('');
-    const [editCompanyName, setEditCompanyName] = useState('');
-    const [editItemType, setEditItemType] = useState('');
-    const [editQuantity, setEditQuantity] = useState('');
-    const [editFuelFilled, setEditFuelFilled] = useState('');
-    const [editFromPlant, setEditFromPlant] = useState('');
-    const [editToPlant, setEditToPlant] = useState('');
-    const [editDepartureTime, setEditDepartureTime] = useState<Date | null>(null);
-    const [editArrivalTime, setEditArrivalTime] = useState<Date | null>(null);
-
-    // Put this near the top of the component, after other useState declarations
-    const predefinedPlants = [
-        'PTA terminal IOCL',
-        'IVL Dhunseri',
-        'Uflex Pvt limited',
-        'Sanathan Textiles Mandi',
-        'Aegios Poly films',
-        'Polymer Terminal IOCL',
-        'Meg Terminal IOCL',
-        'BR Specialist',
-    ];
-
-    // For Add modal
-    const [fromSuggestions, setFromSuggestions] = useState<string[]>([]);
-    const [toSuggestions, setToSuggestions] = useState<string[]>([]);
-    const [showDriverSuggestions, setShowDriverSuggestions] = useState(false);
-
-    // For Edit modal
-    const [editFromSuggestions, setEditFromSuggestions] = useState<string[]>([]);
-    const [editToSuggestions, setEditToSuggestions] = useState<string[]>([]);
-
-    const getSuggestions = (text: string) => {
-        if (!text.trim()) return [];
-        const lowerText = text.toLowerCase();
-        return predefinedPlants.filter(plant =>
-            plant.toLowerCase().includes(lowerText)
-        );
-    };
-
-    useEffect(() => {
-        loadTrips();
-        loadDrivers();
-        checkUserRole();
-    }, []);
-
-    const checkUserRole = async () => {
-        try {
-            if (user?.uid) {
-                const manager = await isManager(user.uid);
-                const admin = await isAdmin(user.uid);
-                console.log('🔍 Role Check:', { manager, admin, uid: user.uid, email: user.email });
-                console.log('👁️ isUserManager will be:', manager || admin);
-                setIsUserManager(manager || admin); // Both managers and admins get access
-            } else {
-                console.log('⚠️ No user UID found');
-            }
-        } catch (error) {
-            console.error('❌ Error checking user role:', error);
-        } finally {
-            setCheckingRole(false);
-        }
-    };
-
-    const loadTrips = async () => {
-        try {
-            setLoading(true);
-            const fetchedTrips = await getTrips();
-            setTrips(fetchedTrips);
-        } catch (error) {
-            console.error('Error loading trips:', error);
-            Alert.alert('Error', 'Failed to load trips');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const loadDrivers = async () => {
-        try {
-            const fetchedDrivers = await getDrivers();
-            setDrivers(fetchedDrivers);
-        } catch (error) {
-            console.error('Error loading drivers:', error);
-            Alert.alert('Error', 'Failed to load drivers');
-        }
-    };
-
-    const closeAddSuggestions = () => {
-        setFromSuggestions([]);
-        setToSuggestions([]);
-        setShowDriverSuggestions(false);
-    };
-
-    const handleLogout = () => {
-        Alert.alert('Logout', 'Are you sure you want to log out?', [
-            { text: 'Cancel', style: 'cancel' },
-            {
-                text: 'Logout',
-                style: 'destructive',
-                onPress: async () => {
-                    await signOut(auth);
-                    navigation.replace('Login');
-                },
-            },
-        ]);
-    };
-
-    const openDeleteAccount = () => {
-        Alert.alert(
-            'Delete Account',
-            'This will permanently delete your account and all data. This cannot be undone.',
-            [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Continue',
-                    style: 'destructive',
-                    onPress: () => setDeleteAccountModalVisible(true),
-                },
-            ]
-        );
-    };
-
-    const handleConfirmDeleteAccount = async () => {
-        const current = auth.currentUser;
-        if (!current?.email) {
-            Alert.alert('Error', 'Not authenticated');
-            return;
-        }
-        if (!deleteAccountPassword.trim()) {
-            Alert.alert('Error', 'Please enter your password');
-            return;
-        }
-
-        setDeletingAccount(true);
-        try {
-            const credential = EmailAuthProvider.credential(
-                current.email,
-                deleteAccountPassword
-            );
-            await reauthenticateWithCredential(current, credential);
-
-            await deleteUserAccountData(current.uid);
-            await deleteUser(current);
-
-            setDeleteAccountModalVisible(false);
-            setDeleteAccountPassword('');
-            Alert.alert('Deleted', 'Your account has been deleted.');
-            navigation.replace('Login');
-        } catch (error: any) {
-            console.error('Error deleting account:', error);
-            const msg =
-                error?.code === 'auth/wrong-password'
-                    ? 'Incorrect password.'
-                    : 'Failed to delete account. Please try again.';
-            Alert.alert('Error', msg);
-        } finally {
-            setDeletingAccount(false);
-        }
-    };
-
-    const formatDateTime = (date: Date | null) => {
-        if (!date) return 'Not selected';
-        return date.toLocaleString('en-US', {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric',
-            hour: 'numeric',
-            minute: '2-digit',
-            hour12: true,
-        });
-    };
-
-    const applyDepartureTime = (date: Date) => {
-        if (datePickerContext === 'edit') {
-            setEditDepartureTime(date);
-        } else {
-            setDepartureTime(date);
-        }
-    };
-
-    const applyArrivalTime = (date: Date) => {
-        if (datePickerContext === 'edit') {
-            setEditArrivalTime(date);
-        } else {
-            setArrivalTime(date);
-        }
-    };
-
-    const resetAddForm = () => {
-        setVehicleNo('');
-        setLrNo('');
-        setDriverName('');
-        setCompanyName('');
-        setItemType('');
-        setQuantity('');
-        setFuelFilled('');
-        setFromPlant('');
-        setToPlant('');
-        setDepartureTime(null);
-        setArrivalTime(null);
-        closeAddSuggestions();
-    };
-
-    const handleAddTrip = async () => {
-        if (
-            !vehicleNo.trim() ||
-            !lrNo.trim() ||
-            !driverName.trim() ||
-            !companyName.trim() ||
-            !itemType.trim() ||
-            !quantity.trim() ||
-            !fromPlant.trim() ||
-            !toPlant.trim() ||
-            !departureTime
-        ) {
-            Alert.alert('Required Fields', 'Please fill all required fields');
-            return;
-        }
-
-        try {
-            const tripData: Omit<TripFirestore, 'createdAt'> = {
-                truck: vehicleNo.trim().toUpperCase(),
-                status: `${fromPlant.trim()} → ${toPlant.trim()}${arrivalTime ? ' (Delivered)' : ' (En route)'}`,
-                time: 'Just now',
-                bidNo: lrNo.trim(),
-                quantity: quantity.trim(),
-                departureTime: departureTime!,
-                arrivalTime: arrivalTime,
-                fuelFilled: fuelFilled.trim() || '0',
-                userId: user?.uid || '',
-                driverName: driverName.trim(),
-                fromPlant: fromPlant.trim(),
-                toPlant: toPlant.trim(),
-                companyName: companyName.trim(),
-                itemType: itemType.trim(),
-            };
-
-            await addTrip(tripData);
-            Alert.alert('Success', `Trip added for ${vehicleNo.toUpperCase()}`);
-
-            resetAddForm();
-            await loadTrips();
-            setAddModalVisible(false);
-        } catch (error) {
-            console.error('Error adding trip:', error);
-            Alert.alert('Error', 'Failed to add trip');
-        }
-    };
-
-    const handleTripPress = (trip: TripFirestore & { id: string }) => {
-        setSelectedTrip(trip);
-        setViewModalVisible(true);
-        setIsEditing(false);
-    };
-
-    const handleEditPress = () => {
-        if (selectedTrip) {
-            setEditVehicleNo(selectedTrip.truck);
-            setEditLrNo(selectedTrip.bidNo);
-            setEditDriverName(selectedTrip.driverName);
-            setEditCompanyName(selectedTrip.companyName);
-            setEditItemType(selectedTrip.itemType);
-            setEditQuantity(selectedTrip.quantity);
-            setEditFuelFilled(selectedTrip.fuelFilled);
-            setEditFromPlant(selectedTrip.fromPlant);
-            setEditToPlant(selectedTrip.toPlant);
-            setEditDepartureTime(selectedTrip.departureTime);
-            setEditArrivalTime(selectedTrip.arrivalTime);
-            setIsEditing(true);
-        }
-    };
-
-    const handleSaveEdit = async () => {
-        if (!selectedTrip) return;
-
-        if (
-            !editVehicleNo.trim() ||
-            !editLrNo.trim() ||
-            !editDriverName.trim() ||
-            !editCompanyName.trim() ||
-            !editItemType.trim() ||
-            !editQuantity.trim() ||
-            !editFromPlant.trim() ||
-            !editToPlant.trim() ||
-            !editDepartureTime
-        ) {
-            Alert.alert('Error', 'Please fill all required fields');
-            return;
-        }
-
-        try {
-            const updatedData: Partial<TripFirestore> = {
-                truck: editVehicleNo.trim().toUpperCase(),
-                bidNo: editLrNo.trim(),
-                driverName: editDriverName.trim(),
-                companyName: editCompanyName.trim(),
-                itemType: editItemType.trim(),
-                quantity: editQuantity.trim(),
-                fuelFilled: editFuelFilled.trim() || '0',
-                departureTime: editDepartureTime!,
-                arrivalTime: editArrivalTime,
-                fromPlant: editFromPlant.trim(),
-                toPlant: editToPlant.trim(),
-                status: `${editFromPlant.trim()} → ${editToPlant.trim()}${editArrivalTime ? ' (Delivered)' : ' (En route)'}`,
-            };
-
-            await updateTrip(selectedTrip.id, updatedData);
-            Alert.alert('Success', 'Trip updated successfully');
-
-            setIsEditing(false);
-            setViewModalVisible(false);
-            setSelectedTrip(null);
-            await loadTrips();
-        } catch (error) {
-            console.error('Error updating trip:', error);
-            Alert.alert('Error', 'Failed to update trip');
-        }
-    };
-
-    const handleDeleteTrip = () => {
-        if (!selectedTrip) return;
-
-        Alert.alert('Delete Trip', 'Are you sure you want to delete this trip?', [
-            { text: 'Cancel', style: 'cancel' },
-            {
-                text: 'Delete',
-                style: 'destructive',
-                onPress: async () => {
-                    try {
-                        await deleteTrip(selectedTrip.id);
-                        Alert.alert('Success', 'Trip deleted');
-                        setViewModalVisible(false);
-                        setSelectedTrip(null);
-                        await loadTrips();
-                    } catch (error) {
-                        console.error('Error deleting trip:', error);
-                        Alert.alert('Error', 'Failed to delete trip');
-                    }
-                },
-            },
-        ]);
-    };
-
-    return (
-        <SafeAreaView style={styles.container}>
-            <ScrollView contentContainerStyle={styles.scrollContent}>
-                {/* Header */}
-                <View style={styles.header}>
-                    <View>
-                        <Text style={styles.welcomeText}>Welcome back!</Text>
-                        <Text style={styles.emailText}>{user?.email || 'User'}</Text>
-                    </View>
-                    <View style={styles.headerActions}>
-                        <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
-                            <Text style={styles.logoutText}>Logout</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            onPress={openDeleteAccount}
-                            style={styles.deleteAccountButton}
-                        >
-                            <Text style={styles.deleteAccountText}>Delete account</Text>
-                        </TouchableOpacity>
-                    </View>
-                </View>
-
-                {/* Manager/Admin Section - Full Permissions */}
-                {isUserManager && !checkingRole && (
-                    <View style={styles.managerButtonsContainer}>
-                        <TouchableOpacity
-                            style={[styles.managerButton, styles.successButton]}
-                            onPress={() => navigation.navigate('DriverManagement')}
-                        >
-                            <Text style={styles.managerButtonText}>Manage Drivers</Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                            style={[styles.managerButton, styles.dangerButton]}
-                            onPress={() => navigation.navigate('UserManagement')}
-                        >
-                            <Text style={styles.managerButtonText}>Manage Users</Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                            style={[styles.managerButton, styles.primaryButton]}
-                            onPress={() => navigation.navigate('DriverManagement')}
-                        >
-                            <Text style={styles.managerButtonText}>Add Driver</Text>
-                        </TouchableOpacity>
-                    </View>
-                )}
-
-                {/* Stats */}
-                <View style={styles.statsGrid}>
-                    {[
-                        { title: 'Total Trucks', value: '24', color: '#1d4ed8' },
-                        { title: 'Active Trips', value: trips.length.toString(), color: '#16a34a' },
-                        { title: 'Drivers Online', value: '15', color: '#ea580c' },
-                        { title: 'Pending Loads', value: '7', color: '#7c3aed' },
-                    ].map((stat, i) => (
-                        <View key={i} style={styles.statCard}>
-                            <Text style={[styles.statValue, { color: stat.color }]}>{stat.value}</Text>
-                            <Text style={styles.statTitle}>{stat.title}</Text>
-                        </View>
-                    ))}
-                </View>
-
-                {/* Recent Trips */}
-                <Text style={styles.sectionTitle}>Recent Trips</Text>
-                <View style={styles.activityList}>
-                    {loading ? (
-                        <View style={styles.loadingState}>
-                            <ActivityIndicator size="small" color="#1d4ed8" />
-                            <Text style={styles.loadingText}>Loading trips...</Text>
-                        </View>
-                    ) : trips.length === 0 ? (
-                        <Text style={styles.emptyText}>No trips yet</Text>
-                    ) : (
-                        trips.map((trip) => (
-                            <TouchableOpacity
-                                key={trip.id}
-                                style={styles.activityItem}
-                                onPress={() => handleTripPress(trip)}
-                            >
-                                <View
-                                    style={[
-                                        styles.activityDot,
-                                        trip.arrivalTime ? styles.deliveredDot : styles.activeDot,
-                                    ]}
-                                />
-
-                                <View style={styles.activityContent}>
-                                    {/* Row 1: Vehicle + Driver */}
-                                    <Text style={styles.tripMainText}>
-                                        {trip.truck}
-                                        {trip.driverName ? (
-                                            <Text style={styles.driverName}>
-                                                {' '}({trip.driverName.split(' ')[0]})
-                                            </Text>
-                                        ) : null}
-                                    </Text>
-
-                                    {/* Row 2: Route */}
-                                    <Text style={styles.routeText}>
-                                        {trip.fromPlant || 'N/A'} → {trip.toPlant || 'N/A'}
-                                    </Text>
-
-                                    {/* Row 3: Times */}
-                                    <Text style={styles.timeText}>
-                                        {formatDateTime(trip.departureTime)}
-                                        {' → '}
-                                        {trip.arrivalTime
-                                            ? formatDateTime(trip.arrivalTime)
-                                            : 'Ongoing'}
-                                    </Text>
-                                </View>
-                            </TouchableOpacity>
-                        ))
-                    )}
-                </View>
-            </ScrollView>
-
-            {/* Floating Action Button */}
-            <TouchableOpacity
-                style={styles.fab}
-                onPress={() => {
-                    closeAddSuggestions();
-                    loadDrivers();
-                    setAddModalVisible(true);
-                }}
-            >
-                <Text style={styles.fabText}>+</Text>
-            </TouchableOpacity>
-
-            {/* Delete Account Modal */}
-            <Modal
-                visible={deleteAccountModalVisible}
-                transparent
-                animationType="fade"
-                onRequestClose={() => {
-                    if (!deletingAccount) setDeleteAccountModalVisible(false);
-                }}
-            >
-                <Pressable
-                    style={styles.modalOverlay}
-                    onPress={() => {
-                        if (!deletingAccount) setDeleteAccountModalVisible(false);
-                    }}
-                >
-                    <View style={styles.deleteModalContent}>
-                        <Text style={styles.deleteModalTitle}>Confirm account deletion</Text>
-                        <Text style={styles.deleteModalSubtitle}>
-                            Enter your password to delete your account.
-                        </Text>
-                        <TextInput
-                            style={styles.deletePasswordInput}
-                            placeholder="Password"
-                            value={deleteAccountPassword}
-                            onChangeText={setDeleteAccountPassword}
-                            secureTextEntry
-                            editable={!deletingAccount}
-                        />
-
-                        <View style={styles.deleteModalButtons}>
-                            <TouchableOpacity
-                                style={styles.deleteCancelButton}
-                                onPress={() => {
-                                    if (deletingAccount) return;
-                                    setDeleteAccountModalVisible(false);
-                                    setDeleteAccountPassword('');
-                                }}
-                                disabled={deletingAccount}
-                            >
-                                <Text style={styles.deleteCancelText}>Cancel</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                style={styles.deleteConfirmButton}
-                                onPress={handleConfirmDeleteAccount}
-                                disabled={deletingAccount}
-                            >
-                                <Text style={styles.deleteConfirmText}>
-                                    {deletingAccount ? 'Deleting…' : 'Delete'}
-                                </Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                </Pressable>
-            </Modal>
-
-            {/* ======================== ADD TRIP MODAL ======================== */}
-            <Modal
-                animationType="slide"
-                transparent={true}
-                visible={addModalVisible}
-                onRequestClose={() => {
-                    resetAddForm();
-                    setAddModalVisible(false);
-                }}
-            >
-                <KeyboardAvoidingView
-                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                    style={styles.modalOverlay}
-                >
-                    <View style={styles.modalContentWide}>
-                        <ScrollView showsVerticalScrollIndicator={false}>
-                            <Text style={styles.modalTitle}>Add New Trip</Text>
-
-                            {/* Row 1 */}
-                            <View style={styles.twoColumnRow}>
-                                <TextInput
-                                    style={styles.halfInput}
-                                    placeholder="Vehicle Number *"
-                                    value={vehicleNo}
-                                    onChangeText={setVehicleNo}
-                                    onFocus={closeAddSuggestions}
-                                    autoCapitalize="characters"
-                                />
-                                <TextInput
-                                    style={styles.halfInput}
-                                    placeholder="LR No *"
-                                    value={lrNo}
-                                    onChangeText={setLrNo}
-                                    onFocus={closeAddSuggestions}
-                                />
-                            </View>
-
-                            {/* Row 2 */}
-                            <View style={[styles.twoColumnRow, styles.driverSuggestionsRow]}>
-                                <View style={[styles.inputWithSuggestions, styles.halfField, styles.driverSelectorField]}>
-                                    <TouchableOpacity
-                                        style={[styles.halfInput, styles.selectInput]}
-                                        activeOpacity={0.8}
-                                        onPress={() => {
-                                            setShowDriverSuggestions(true);
-                                            setFromSuggestions([]);
-                                            setToSuggestions([]);
-                                        }}
-                                    >
-                                        <Text style={driverName ? styles.selectText : styles.selectPlaceholder}>
-                                            {driverName || 'Driver Name *'}
-                                        </Text>
-                                    </TouchableOpacity>
-                                    {showDriverSuggestions && (
-                                        <View style={styles.suggestionsContainer}>
-                                            <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled">
-                                                {drivers.length === 0 ? (
-                                                    <View style={styles.suggestionItem}>
-                                                        <Text style={styles.emptySuggestionText}>No drivers added</Text>
-                                                    </View>
-                                                ) : (
-                                                    drivers.map((driver, index) => (
-                                                        <TouchableOpacity
-                                                            key={driver.id}
-                                                            style={[
-                                                                styles.suggestionItem,
-                                                                index === drivers.length - 1 && styles.suggestionItemLast,
-                                                            ]}
-                                                            onPress={() => {
-                                                                setDriverName(driver.fullName);
-                                                                setShowDriverSuggestions(false);
-                                                            }}
-                                                        >
-                                                            <Text style={styles.suggestionText}>{driver.fullName}</Text>
-                                                            <Text style={styles.suggestionMetaText}>
-                                                                {driver.vehicleOwned || 'No vehicle assigned'}
-                                                            </Text>
-                                                        </TouchableOpacity>
-                                                    ))
-                                                )}
-                                            </ScrollView>
-                                        </View>
-                                    )}
-                                </View>
-                                <TextInput
-                                    style={styles.halfInput}
-                                    placeholder="Company Name *"
-                                    value={companyName}
-                                    onChangeText={setCompanyName}
-                                    onFocus={closeAddSuggestions}
-                                />
-                            </View>
-
-                            {/* Row 3 */}
-                            <View style={styles.twoColumnRow}>
-                                <TextInput
-                                    style={styles.halfInput}
-                                    placeholder="Item Type *"
-                                    value={itemType}
-                                    onChangeText={setItemType}
-                                    onFocus={closeAddSuggestions}
-                                />
-                                <TextInput
-                                    style={styles.halfInput}
-                                    placeholder="Quantity (tons) *"
-                                    value={quantity}
-                                    onChangeText={setQuantity}
-                                    onFocus={closeAddSuggestions}
-                                    keyboardType="numeric"
-                                />
-                            </View>
-
-                            {/* Plants - Dropdown + Custom input */}
-                            {/* Plants - Autocomplete TextInput */}
-                            {/* Plants - Autocomplete */}
-                            <View style={[styles.twoColumnRow, styles.plantSuggestionsRow]}>
-                                {/* From Plant */}
-                                <View style={[styles.inputWithSuggestions, styles.halfField]}>
-                                    <TextInput
-                                        style={[styles.halfInput, styles.inputInsideSuggestion]}
-                                        placeholder="From Plant *"
-                                        value={fromPlant}
-                                        onFocus={() => {
-                                            setFromSuggestions(predefinedPlants);
-                                            setToSuggestions([]);
-                                            setShowDriverSuggestions(false);
-                                        }}
-                                        onChangeText={(text) => {
-                                            setFromPlant(text);
-                                            setFromSuggestions(text.trim() ? getSuggestions(text) : predefinedPlants);
-                                        }}
-                                        autoCapitalize="words"
-                                    />
-                                    {fromSuggestions.length > 0 && (
-                                        <View style={styles.suggestionsContainer}>
-                                            <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled">
-                                                {fromSuggestions.map((plant, index) => (
-                                                    <TouchableOpacity
-                                                        key={index}
-                                                        style={[
-                                                            styles.suggestionItem,
-                                                            index === fromSuggestions.length - 1 && styles.suggestionItemLast,
-                                                        ]}
-                                                        onPress={() => {
-                                                            setFromPlant(plant);
-                                                            setFromSuggestions([]);
-                                                            setShowDriverSuggestions(false);
-                                                        }}
-                                                    >
-                                                        <Text style={styles.suggestionText}>{plant}</Text>
-                                                    </TouchableOpacity>
-                                                ))}
-                                            </ScrollView>
-                                        </View>
-                                    )}
-                                </View>
-
-                                {/* To Plant */}
-                                <View style={[styles.inputWithSuggestions, styles.halfField]}>
-                                    <TextInput
-                                        style={[styles.halfInput, styles.inputInsideSuggestion]}
-                                        placeholder="To Plant *"
-                                        value={toPlant}
-                                        onFocus={() => {
-                                            setToSuggestions(predefinedPlants);
-                                            setFromSuggestions([]);
-                                            setShowDriverSuggestions(false);
-                                        }}
-                                        onChangeText={(text) => {
-                                            setToPlant(text);
-                                            setToSuggestions(text.trim() ? getSuggestions(text) : predefinedPlants);
-                                        }}
-                                        autoCapitalize="words"
-                                    />
-                                    {toSuggestions.length > 0 && (
-                                        <View style={styles.suggestionsContainer}>
-                                            <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled">
-                                                {toSuggestions.map((plant, index) => (
-                                                    <TouchableOpacity
-                                                        key={index}
-                                                        style={[
-                                                            styles.suggestionItem,
-                                                            index === toSuggestions.length - 1 && styles.suggestionItemLast,
-                                                        ]}
-                                                        onPress={() => {
-                                                            setToPlant(plant);
-                                                            setToSuggestions([]);
-                                                            setShowDriverSuggestions(false);
-                                                        }}
-                                                    >
-                                                        <Text style={styles.suggestionText}>{plant}</Text>
-                                                    </TouchableOpacity>
-                                                ))}
-                                            </ScrollView>
-                                        </View>
-                                    )}
-                                </View>
-                            </View>
-
-                            {/* Row 5 - Times */}
-                            <View style={styles.twoColumnRow}>
-                                <TouchableOpacity
-                                    style={styles.halfDateButton}
-                                    onPress={() => {
-                                        closeAddSuggestions();
-                                        setTempDepartureDate(departureTime || new Date());
-                                        setDatePickerContext('add');
-                                        setShowDeparturePicker(true);
-                                    }}
-                                >
-                                    <Text style={[styles.dateText, departureTime && styles.dateTextSelected]}>
-                                        {departureTime ? formatDateTime(departureTime) : 'Departure *'}
-                                    </Text>
-                                </TouchableOpacity>
-
-                                <TouchableOpacity
-                                    style={styles.halfDateButton}
-                                    onPress={() => {
-                                        closeAddSuggestions();
-                                        setTempArrivalDate(arrivalTime || new Date());
-                                        setDatePickerContext('add');
-                                        setShowArrivalPicker(true);
-                                    }}
-                                >
-                                    <Text style={[styles.dateText, arrivalTime && styles.dateTextSelected]}>
-                                        {arrivalTime ? formatDateTime(arrivalTime) : 'Arrival'}
-                                    </Text>
-                                </TouchableOpacity>
-                            </View>
-
-                            {/* Fuel */}
-                            <TextInput
-                                style={styles.modalInput}
-                                placeholder="Fuel Filled (liters)"
-                                value={fuelFilled}
-                                onChangeText={setFuelFilled}
-                                onFocus={closeAddSuggestions}
-                                keyboardType="numeric"
-                            />
-
-                            {/* Date Pickers */}
-                            {showDeparturePicker && (
-                                <Modal transparent visible={showDeparturePicker}>
-                                    <View style={pickerModalStyles.overlay}>
-                                        <View style={pickerModalStyles.container}>
-                                            <DateTimePicker
-                                                value={tempDepartureDate}
-                                                mode="datetime"
-                                                display="spinner"
-                                                onChange={(e, date) => {
-                                                    if (!date) {
-                                                        if (Platform.OS === 'android') setShowDeparturePicker(false);
-                                                        return;
-                                                    }
-
-                                                    setTempDepartureDate(date);
-                                                    if (Platform.OS === 'android') {
-                                                        applyDepartureTime(date);
-                                                        setShowDeparturePicker(false);
-                                                    }
-                                                }}
-                                            />
-                                            {Platform.OS === 'ios' && (
-                                                <Pressable
-                                                    style={pickerModalStyles.doneButton}
-                                                    onPress={() => {
-                                                        applyDepartureTime(tempDepartureDate);
-                                                        setShowDeparturePicker(false);
-                                                    }}
-                                                >
-                                                    <Text style={pickerModalStyles.doneText}>Done</Text>
-                                                </Pressable>
-                                            )}
-                                        </View>
-                                    </View>
-                                </Modal>
-                            )}
-
-                            {showArrivalPicker && (
-                                <Modal transparent visible={showArrivalPicker}>
-                                    <View style={pickerModalStyles.overlay}>
-                                        <View style={pickerModalStyles.container}>
-                                            <DateTimePicker
-                                                value={tempArrivalDate}
-                                                mode="datetime"
-                                                display="spinner"
-                                                onChange={(e, date) => {
-                                                    if (!date) {
-                                                        if (Platform.OS === 'android') setShowArrivalPicker(false);
-                                                        return;
-                                                    }
-
-                                                    setTempArrivalDate(date);
-                                                    if (Platform.OS === 'android') {
-                                                        applyArrivalTime(date);
-                                                        setShowArrivalPicker(false);
-                                                    }
-                                                }}
-                                            />
-                                            {Platform.OS === 'ios' && (
-                                                <Pressable
-                                                    style={pickerModalStyles.doneButton}
-                                                    onPress={() => {
-                                                        applyArrivalTime(tempArrivalDate);
-                                                        setShowArrivalPicker(false);
-                                                    }}
-                                                >
-                                                    <Text style={pickerModalStyles.doneText}>Done</Text>
-                                                </Pressable>
-                                            )}
-                                        </View>
-                                    </View>
-                                </Modal>
-                            )}
-
-                            {/* Buttons */}
-                            <View style={styles.modalButtons}>
-                                <Pressable
-                                    style={[styles.modalButton, styles.cancelButton]}
-                                    onPress={() => {
-                                        resetAddForm();
-                                        setAddModalVisible(false);
-                                    }}
-                                >
-                                    <Text style={styles.cancelText}>Cancel</Text>
-                                </Pressable>
-                                <Pressable
-                                    style={[styles.modalButton, styles.saveButton]}
-                                    onPress={handleAddTrip}
-                                >
-                                    <Text style={styles.saveText}>Save</Text>
-                                </Pressable>
-                            </View>
-                        </ScrollView>
-                    </View>
-                </KeyboardAvoidingView>
-            </Modal>
-
-            {/* ======================== VIEW / EDIT MODAL ======================== */}
-            <Modal
-                animationType="slide"
-                transparent={true}
-                visible={viewModalVisible}
-                onRequestClose={() => {
-                    setViewModalVisible(false);
-                    setIsEditing(false);
-                }}
-            >
-                <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
-                    <View style={styles.modalContentWide}>
-                        <ScrollView showsVerticalScrollIndicator={false}>
-                            <Text style={styles.modalTitle}>{isEditing ? 'Edit Trip' : 'Trip Details'}</Text>
-
-                            {isEditing ? (
-                                <>
-                                    {/* Edit Form - Two column layout */}
-                                    <View style={styles.twoColumnRow}>
-                                        <TextInput
-                                            style={styles.halfInput}
-                                            value={editVehicleNo}
-                                            onChangeText={setEditVehicleNo}
-                                            placeholder="Vehicle Number *"
-                                            autoCapitalize="characters"
-                                        />
-                                        <TextInput
-                                            style={styles.halfInput}
-                                            value={editLrNo}
-                                            onChangeText={setEditLrNo}
-                                            placeholder="LR No *"
-                                        />
-                                    </View>
-
-                                    <View style={styles.twoColumnRow}>
-                                        <TextInput
-                                            style={styles.halfInput}
-                                            value={editDriverName}
-                                            onChangeText={setEditDriverName}
-                                            placeholder="Driver Name *"
-                                            autoCapitalize="words"
-                                        />
-                                        <TextInput
-                                            style={styles.halfInput}
-                                            value={editCompanyName}
-                                            onChangeText={setEditCompanyName}
-                                            placeholder="Company Name *"
-                                        />
-                                    </View>
-
-                                    <View style={styles.twoColumnRow}>
-                                        <TextInput
-                                            style={styles.halfInput}
-                                            value={editItemType}
-                                            onChangeText={setEditItemType}
-                                            placeholder="Item Type *"
-                                        />
-                                        <TextInput
-                                            style={styles.halfInput}
-                                            value={editQuantity}
-                                            onChangeText={setEditQuantity}
-                                            placeholder="Quantity (tons) *"
-                                            keyboardType="numeric"
-                                        />
-                                    </View>
-
-                                    {/* Plants - Edit */}
-                                    <View style={styles.twoColumnRow}>
-                                        {/* From Plant Edit */}
-                                        <View style={[styles.inputWithSuggestions, styles.halfField]}>
-                                            <TextInput
-                                                style={[styles.halfInput, styles.inputInsideSuggestion]}
-                                                placeholder="From Plant *"
-                                                value={editFromPlant}
-                                                onChangeText={(text) => {
-                                                    setEditFromPlant(text);
-                                                    setEditFromSuggestions(text.trim() ? getSuggestions(text) : []);
-                                                }}
-                                                autoCapitalize="words"
-                                            />
-                                            {editFromSuggestions.length > 0 && (
-                                                <View style={styles.suggestionsContainer}>
-                                                    <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled">
-                                                        {editFromSuggestions.map((plant, index) => (
-                                                            <TouchableOpacity
-                                                                key={index}
-                                                                style={[
-                                                                    styles.suggestionItem,
-                                                                    index === editFromSuggestions.length - 1 && styles.suggestionItemLast,
-                                                                ]}
-                                                                onPress={() => {
-                                                                    setEditFromPlant(plant);
-                                                                    setEditFromSuggestions([]);
-                                                                }}
-                                                            >
-                                                                <Text style={styles.suggestionText}>{plant}</Text>
-                                                            </TouchableOpacity>
-                                                        ))}
-                                                    </ScrollView>
-                                                </View>
-                                            )}
-                                        </View>
-
-                                        {/* To Plant Edit */}
-                                        <View style={[styles.inputWithSuggestions, styles.halfField]}>
-                                            <TextInput
-                                                style={[styles.halfInput, styles.inputInsideSuggestion]}
-                                                placeholder="To Plant *"
-                                                value={editToPlant}
-                                                onChangeText={(text) => {
-                                                    setEditToPlant(text);
-                                                    setEditToSuggestions(text.trim() ? getSuggestions(text) : []);
-                                                }}
-                                                autoCapitalize="words"
-                                            />
-                                            {editToSuggestions.length > 0 && (
-                                                <View style={styles.suggestionsContainer}>
-                                                    <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled">
-                                                        {editToSuggestions.map((plant, index) => (
-                                                            <TouchableOpacity
-                                                                key={index}
-                                                                style={[
-                                                                    styles.suggestionItem,
-                                                                    index === editToSuggestions.length - 1 && styles.suggestionItemLast,
-                                                                ]}
-                                                                onPress={() => {
-                                                                    setEditToPlant(plant);
-                                                                    setEditToSuggestions([]);
-                                                                }}
-                                                            >
-                                                                <Text style={styles.suggestionText}>{plant}</Text>
-                                                            </TouchableOpacity>
-                                                        ))}
-                                                    </ScrollView>
-                                                </View>
-                                            )}
-                                        </View>
-                                    </View>
-
-                                    <View style={styles.twoColumnRow}>
-                                        <TouchableOpacity
-                                            style={styles.halfDateButton}
-                                            onPress={() => {
-                                                setTempDepartureDate(editDepartureTime || new Date());
-                                                setDatePickerContext('edit');
-                                                setShowDeparturePicker(true);
-                                            }}
-                                        >
-                                            <Text style={[styles.dateText, editDepartureTime && styles.dateTextSelected]}>
-                                                {editDepartureTime ? formatDateTime(editDepartureTime) : 'Departure *'}
-                                            </Text>
-                                        </TouchableOpacity>
-
-                                        <TouchableOpacity
-                                            style={styles.halfDateButton}
-                                            onPress={() => {
-                                                setTempArrivalDate(editArrivalTime || new Date());
-                                                setDatePickerContext('edit');
-                                                setShowArrivalPicker(true);
-                                            }}
-                                        >
-                                            <Text style={[styles.dateText, editArrivalTime && styles.dateTextSelected]}>
-                                                {editArrivalTime ? formatDateTime(editArrivalTime) : 'Arrival'}
-                                            </Text>
-                                        </TouchableOpacity>
-                                    </View>
-
-                                    <TextInput
-                                        style={styles.modalInput}
-                                        value={editFuelFilled}
-                                        onChangeText={setEditFuelFilled}
-                                        placeholder="Fuel Filled (liters)"
-                                        keyboardType="numeric"
-                                    />
-
-                                    {/* Edit date pickers */}
-                                    {showDeparturePicker && (
-                                        <Modal transparent visible={showDeparturePicker}>
-                                            <View style={pickerModalStyles.overlay}>
-                                                <View style={pickerModalStyles.container}>
-                                                    <DateTimePicker
-                                                        value={tempDepartureDate}
-                                                        mode="datetime"
-                                                        display="spinner"
-                                                        onChange={(e, date) => {
-                                                            if (!date) {
-                                                                if (Platform.OS === 'android') setShowDeparturePicker(false);
-                                                                return;
-                                                            }
-
-                                                            setTempDepartureDate(date);
-                                                            if (Platform.OS === 'android') {
-                                                                applyDepartureTime(date);
-                                                                setShowDeparturePicker(false);
-                                                            }
-                                                        }}
-                                                    />
-                                                    {Platform.OS === 'ios' && (
-                                                        <Pressable
-                                                            style={pickerModalStyles.doneButton}
-                                                            onPress={() => {
-                                                                applyDepartureTime(tempDepartureDate);
-                                                                setShowDeparturePicker(false);
-                                                            }}
-                                                        >
-                                                            <Text style={pickerModalStyles.doneText}>Done</Text>
-                                                        </Pressable>
-                                                    )}
-                                                </View>
-                                            </View>
-                                        </Modal>
-                                    )}
-
-                                    {showArrivalPicker && (
-                                        <Modal transparent visible={showArrivalPicker}>
-                                            <View style={pickerModalStyles.overlay}>
-                                                <View style={pickerModalStyles.container}>
-                                                    <DateTimePicker
-                                                        value={tempArrivalDate}
-                                                        mode="datetime"
-                                                        display="spinner"
-                                                        onChange={(e, date) => {
-                                                            if (!date) {
-                                                                if (Platform.OS === 'android') setShowArrivalPicker(false);
-                                                                return;
-                                                            }
-
-                                                            setTempArrivalDate(date);
-                                                            if (Platform.OS === 'android') {
-                                                                applyArrivalTime(date);
-                                                                setShowArrivalPicker(false);
-                                                            }
-                                                        }}
-                                                    />
-                                                    {Platform.OS === 'ios' && (
-                                                        <Pressable
-                                                            style={pickerModalStyles.doneButton}
-                                                            onPress={() => {
-                                                                applyArrivalTime(tempArrivalDate);
-                                                                setShowArrivalPicker(false);
-                                                            }}
-                                                        >
-                                                            <Text style={pickerModalStyles.doneText}>Done</Text>
-                                                        </Pressable>
-                                                    )}
-                                                </View>
-                                            </View>
-                                        </Modal>
-                                    )}
-
-                                    <View style={styles.modalButtons}>
-                                        <Pressable
-                                            style={[styles.modalButton, styles.cancelButton]}
-                                            onPress={() => setIsEditing(false)}
-                                        >
-                                            <Text style={styles.cancelText}>Cancel</Text>
-                                        </Pressable>
-                                        <Pressable
-                                            style={[styles.modalButton, styles.saveButton]}
-                                            onPress={handleSaveEdit}
-                                        >
-                                            <Text style={styles.saveText}>Save</Text>
-                                        </Pressable>
-                                    </View>
-                                </>
-                            ) : (
-                                /* View Mode */
-                                <>
-                                    <View style={styles.detailRow}>
-                                        <Text style={styles.detailLabel}>Vehicle:</Text>
-                                        <Text style={styles.detailValue}>{selectedTrip?.truck}</Text>
-                                    </View>
-                                    <View style={styles.detailRow}>
-                                        <Text style={styles.detailLabel}>LR No:</Text>
-                                        <Text style={styles.detailValue}>{selectedTrip?.bidNo}</Text>
-                                    </View>
-                                    <View style={styles.detailRow}>
-                                        <Text style={styles.detailLabel}>Driver:</Text>
-                                        <Text style={styles.detailValue}>{selectedTrip?.driverName}</Text>
-                                    </View>
-                                    <View style={styles.detailRow}>
-                                        <Text style={styles.detailLabel}>Company:</Text>
-                                        <Text style={styles.detailValue}>{selectedTrip?.companyName}</Text>
-                                    </View>
-                                    <View style={styles.detailRow}>
-                                        <Text style={styles.detailLabel}>Item:</Text>
-                                        <Text style={styles.detailValue}>{selectedTrip?.itemType}</Text>
-                                    </View>
-                                    <View style={styles.detailRow}>
-                                        <Text style={styles.detailLabel}>Quantity:</Text>
-                                        <Text style={styles.detailValue}>{selectedTrip?.quantity} tons</Text>
-                                    </View>
-                                    <View style={styles.detailRow}>
-                                        <Text style={styles.detailLabel}>From → To:</Text>
-                                        <Text style={styles.detailValue}>
-                                            {selectedTrip?.fromPlant} → {selectedTrip?.toPlant}
-                                        </Text>
-                                    </View>
-                                    <View style={styles.detailRow}>
-                                        <Text style={styles.detailLabel}>Departure:</Text>
-                                        <Text style={styles.detailValue}>
-                                            {formatDateTime(selectedTrip?.departureTime || null)}
-                                        </Text>
-                                    </View>
-                                    <View style={styles.detailRow}>
-                                        <Text style={styles.detailLabel}>Arrival:</Text>
-                                        <Text style={styles.detailValue}>
-                                            {formatDateTime(selectedTrip?.arrivalTime || null) || 'Not arrived'}
-                                        </Text>
-                                    </View>
-                                    <View style={styles.detailRow}>
-                                        <Text style={styles.detailLabel}>Fuel:</Text>
-                                        <Text style={styles.detailValue}>{selectedTrip?.fuelFilled} L</Text>
-                                    </View>
-
-                                    <View style={styles.viewModalButtons}>
-                                        <Pressable
-                                            style={[styles.modalButton, styles.editButtonStyle]}
-                                            onPress={handleEditPress}
-                                        >
-                                            <Text style={styles.editButtonText}>Edit</Text>
-                                        </Pressable>
-                                        <Pressable
-                                            style={[styles.modalButton, styles.deleteButtonStyle]}
-                                            onPress={handleDeleteTrip}
-                                        >
-                                            <Text style={styles.deleteButtonText}>Delete</Text>
-                                        </Pressable>
-                                    </View>
-
-                                    <Pressable
-                                        style={styles.closeButton}
-                                        onPress={() => {
-                                            setViewModalVisible(false);
-                                            setIsEditing(false);
-                                        }}
-                                    >
-                                        <Text style={styles.cancelText}>Close</Text>
-                                    </Pressable>
-                                </>
-                            )}
-                        </ScrollView>
-                    </View>
-                </KeyboardAvoidingView>
-            </Modal>
-        </SafeAreaView>
-    );
+import { getTrips, getTripsByUser, TripFirestore } from '../services/tripService';
+import { getDrivers } from '../services/driverService';
+import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
+import type { UserRole, TabId } from './MainTabsScreen';
+
+interface Props {
+  role: UserRole;
+  onTabPress: (tab: TabId) => void;
 }
 
-/* ────────────────────────────────────────────────────────────── */
-/* Styles (updated & cleaned) */
-const styles = {
-    container: { flex: 1, backgroundColor: '#f3f4f6' } as const,
-    scrollContent: { padding: 20, paddingBottom: 100 } as const,
-    header: {
-        flexDirection: 'row' as const,
-        justifyContent: 'space-between' as const,
-        alignItems: 'center' as const,
-        marginBottom: 24,
-    },
-    headerActions: {
-        alignItems: 'flex-end' as const,
-        gap: 8,
-    },
-    welcomeText: { fontSize: 28, fontWeight: '700' as const, color: '#111827' },
-    emailText: { fontSize: 16, color: '#6b7280', marginTop: 4 },
-    logoutButton: {
-        backgroundColor: '#ef4444',
-        paddingHorizontal: 16,
-        paddingVertical: 10,
-        borderRadius: 8,
-    },
-    logoutText: { color: '#fff', fontWeight: '600' as const },
-
-    deleteAccountButton: {
-        paddingVertical: 4,
-        paddingHorizontal: 6,
-    },
-    deleteAccountText: {
-        color: '#ef4444',
-        fontWeight: '600' as const,
-        fontSize: 12,
-    },
-
-    deleteModalContent: {
-        backgroundColor: '#fff',
-        borderRadius: 12,
-        padding: 18,
-        width: '88%' as const,
-        maxWidth: 420,
-        alignSelf: 'center' as const,
-    },
-    deleteModalTitle: {
-        fontSize: 18,
-        fontWeight: '700' as const,
-        color: '#111827',
-        marginBottom: 6,
-        textAlign: 'center' as const,
-    },
-    deleteModalSubtitle: {
-        fontSize: 13,
-        color: '#6b7280',
-        marginBottom: 14,
-        textAlign: 'center' as const,
-    },
-    deletePasswordInput: {
-        borderWidth: 1,
-        borderColor: '#e5e7eb',
-        borderRadius: 10,
-        paddingHorizontal: 12,
-        paddingVertical: 10,
-        fontSize: 15,
-        backgroundColor: '#f9fafb',
-        marginBottom: 14,
-    },
-    deleteModalButtons: {
-        flexDirection: 'row' as const,
-        gap: 10,
-    },
-    deleteCancelButton: {
-        flex: 1,
-        backgroundColor: '#e5e7eb',
-        paddingVertical: 12,
-        borderRadius: 10,
-        alignItems: 'center' as const,
-    },
-    deleteCancelText: {
-        color: '#374151',
-        fontWeight: '600' as const,
-    },
-    deleteConfirmButton: {
-        flex: 1,
-        backgroundColor: '#ef4444',
-        paddingVertical: 12,
-        borderRadius: 10,
-        alignItems: 'center' as const,
-    },
-    deleteConfirmText: {
-        color: '#fff',
-        fontWeight: '700' as const,
-    },
-
-    statsGrid: {
-        flexDirection: 'row' as const,
-        flexWrap: 'wrap' as const,
-        justifyContent: 'space-between' as const,
-        marginBottom: 32,
-    },
-    statCard: {
-        backgroundColor: '#fff',
-        width: '48%' as const,
-        padding: 20,
-        borderRadius: 8,
-        marginBottom: 16,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 8,
-        elevation: 3,
-    },
-    statValue: { fontSize: 36, fontWeight: '700' as const },
-    statTitle: { fontSize: 14, color: '#6b7280', marginTop: 8 },
-
-    sectionTitle: {
-        fontSize: 20,
-        fontWeight: '600' as const,
-        color: '#111827',
-        marginBottom: 16,
-    },
-    activityList: {
-        backgroundColor: '#fff',
-        borderRadius: 8,
-        padding: 16,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 8,
-        elevation: 3,
-    },
-    managerButtonsContainer: {
-        flexDirection: 'row' as const,
-        flexWrap: 'wrap' as const,
-        gap: 12,
-        marginBottom: 20,
-    },
-    managerButton: {
-        flex: 1,
-        minWidth: 150,
-        borderRadius: 8,
-        paddingVertical: 12,
-        alignItems: 'center' as const,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
-    },
-    primaryButton: {
-        backgroundColor: '#1d4ed8',
-    },
-    successButton: {
-        backgroundColor: '#10b981',
-    },
-    dangerButton: {
-        backgroundColor: '#dc2626',
-    },
-    managerButtonText: {
-        color: '#fff',
-        fontSize: 14,
-        fontWeight: '600' as const,
-    },
-    activityItem: {
-        flexDirection: 'row' as const,
-        paddingVertical: 14,
-        borderBottomWidth: 1,
-        borderBottomColor: '#e5e7eb',
-    },
-    inputWithSuggestions: {
-        position: 'relative' as const,
-    },
-    halfField: {
-        flex: 1,
-        minWidth: 0,
-    },
-    inputInsideSuggestion: {
-        width: '100%' as const,
-        flex: 0,
-    },
-    driverSelectorField: {
-        zIndex: 600,
-        elevation: 12,
-    },
-    selectInput: {
-        width: '100%' as const,
-        flex: 0,
-        justifyContent: 'center' as const,
-    },
-    selectText: {
-        color: '#111827',
-        fontSize: 15,
-    },
-    selectPlaceholder: {
-        color: '#9ca3af',
-        fontSize: 15,
-    },
-    activityDot: {
-        width: 10,
-        height: 10,
-        borderRadius: 5,
-        marginRight: 14,
-        marginTop: 10,
-    },
-    activeDot: {
-        backgroundColor: '#1d4ed8',
-    },
-    deliveredDot: {
-        backgroundColor: '#10b981',
-    },
-    activityContent: {
-        flex: 1,
-    },
-    suggestionsContainer: {
-        position: 'absolute' as const,
-        top: 52,
-        left: 0,
-        right: 0,
-        zIndex: 700,
-        backgroundColor: '#ffffff',
-        borderWidth: 1,
-        borderColor: '#d1d5db',
-        borderRadius: 8,
-        maxHeight: 200,
-        elevation: 12,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.15,
-        shadowRadius: 8,
-    },
-    suggestionItem: {
-        paddingVertical: 12,
-        paddingHorizontal: 16,
-        borderBottomWidth: 1,
-        borderBottomColor: '#f3f4f6',
-    },
-    suggestionItemLast: {
-        borderBottomWidth: 0,
-    },
-    suggestionText: {
-        fontSize: 15,
-        color: '#111827',
-    },
-    suggestionMetaText: {
-        color: '#6b7280',
-        fontSize: 12,
-        marginTop: 2,
-    },
-    emptySuggestionText: {
-        color: '#9ca3af',
-        fontSize: 14,
-        textAlign: 'center' as const,
-    },
-    tripMainText: {
-        fontSize: 16,
-        fontWeight: '600' as const,
-        color: '#111827',
-        marginBottom: 4,
-    },
-    driverName: {
-        fontSize: 15,
-        fontWeight: '500' as const,
-        color: '#4b5563',
-    },
-    routeText: {
-        fontSize: 14,
-        color: '#1d4ed8',
-        fontWeight: '500' as const,
-        marginBottom: 4,
-    },
-    timeText: {
-        fontSize: 13,
-        color: '#6b7280',
-    },
-    fab: {
-        position: 'absolute' as const,
-        right: 20,
-        bottom: 30,
-        backgroundColor: '#1d4ed8',
-        width: 60,
-        height: 60,
-        borderRadius: 30,
-        justifyContent: 'center' as const,
-        alignItems: 'center' as const,
-        elevation: 8,
-    },
-    fabText: { color: '#fff', fontSize: 32, fontWeight: '300' as const },
-    modalOverlay: {
-        flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.5)',
-        justifyContent: 'center' as const,
-        alignItems: 'center' as const,
-    },
-    modalContentWide: {
-        backgroundColor: '#fff',
-        width: '92%' as const,
-        maxHeight: '88%' as const,
-        borderRadius: 12,
-        padding: 20,
-    },
-    modalTitle: {
-        fontSize: 22,
-        fontWeight: '700' as const,
-        color: '#111827',
-        textAlign: 'center' as const,
-        marginBottom: 16,
-    },
-    twoColumnRow: {
-        flexDirection: 'row' as const,
-        gap: 10,
-        marginBottom: 14,
-    },
-    driverSuggestionsRow: {
-        zIndex: 500,
-        elevation: 10,
-    },
-    plantSuggestionsRow: {
-        zIndex: 100,
-        elevation: 4,
-    },
-    halfInput: {
-        flex: 1,
-        minWidth: 0,
-        borderWidth: 1,
-        borderColor: '#d1d5db',
-        borderRadius: 8,
-        paddingHorizontal: 12,
-        paddingVertical: 12,
-        fontSize: 15,
-        backgroundColor: '#f9fafb',
-    },
-    halfDateButton: {
-        flex: 1,
-        minWidth: 0,
-        borderWidth: 1,
-        borderColor: '#d1d5db',
-        borderRadius: 8,
-        paddingHorizontal: 12,
-        paddingVertical: 14,
-        backgroundColor: '#f9fafb',
-        justifyContent: 'center' as const,
-    },
-    modalInput: {
-        borderWidth: 1,
-        borderColor: '#d1d5db',
-        borderRadius: 8,
-        paddingHorizontal: 14,
-        paddingVertical: 12,
-        fontSize: 15,
-        backgroundColor: '#f9fafb',
-        marginBottom: 14,
-    },
-    dateText: { fontSize: 15, color: '#9ca3af' },
-    dateTextSelected: { color: '#111827', fontWeight: '500' as const },
-    modalButtons: {
-        flexDirection: 'row' as const,
-        justifyContent: 'space-between' as const,
-        marginTop: 20,
-        gap: 12,
-    },
-    modalButton: {
-        flex: 1,
-        paddingVertical: 14,
-        borderRadius: 8,
-        alignItems: 'center' as const,
-    },
-    cancelButton: { backgroundColor: '#e5e7eb' },
-    saveButton: { backgroundColor: '#1d4ed8' },
-    cancelText: { color: '#374151', fontWeight: '600' as const },
-    saveText: { color: '#fff', fontWeight: '700' as const },
-
-    detailRow: {
-        flexDirection: 'row' as const,
-        justifyContent: 'space-between' as const,
-        paddingVertical: 12,
-        borderBottomWidth: 1,
-        borderBottomColor: '#e5e7eb',
-    },
-    detailLabel: {
-        fontSize: 15,
-        fontWeight: '600' as const,
-        color: '#374151',
-        flex: 1,
-    },
-    detailValue: {
-        fontSize: 15,
-        color: '#111827',
-        flex: 1,
-        textAlign: 'right' as const,
-    },
-    viewModalButtons: {
-        flexDirection: 'row' as const,
-        justifyContent: 'space-between' as const,
-        marginTop: 24,
-        gap: 12,
-    },
-    editButtonStyle: { backgroundColor: '#1d4ed8' },
-    editButtonText: { color: '#fff', fontWeight: '700' as const },
-    deleteButtonStyle: { backgroundColor: '#ef4444' },
-    deleteButtonText: { color: '#fff', fontWeight: '700' as const },
-    closeButton: {
-        backgroundColor: '#e5e7eb',
-        paddingVertical: 14,
-        borderRadius: 8,
-        alignItems: 'center' as const,
-        marginTop: 16,
-    },
-    emptyText: {
-        textAlign: 'center' as const,
-        color: '#9ca3af',
-        fontSize: 16,
-        padding: 40,
-    },
-    loadingState: {
-        alignItems: 'center' as const,
-        justifyContent: 'center' as const,
-        padding: 40,
-        gap: 10,
-    },
-    loadingText: {
-        color: '#6b7280',
-        fontSize: 14,
-    },
+const SkeletonBox = ({ width, height, style }: { width: any; height: number; style?: any }) => {
+  const anim = useRef(new Animated.Value(0.4)).current;
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(anim, { toValue: 1, duration: 700, useNativeDriver: true }),
+        Animated.timing(anim, { toValue: 0.4, duration: 700, useNativeDriver: true }),
+      ])
+    ).start();
+  }, []);
+  return (
+    <Animated.View
+      style={[
+        { width, height, borderRadius: Radius.sm, backgroundColor: Colors.border, opacity: anim },
+        style,
+      ]}
+    />
+  );
 };
 
-const pickerModalStyles = {
-    overlay: {
-        flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.5)',
-        justifyContent: 'flex-end' as const,
-    },
-    container: {
-        backgroundColor: 'white',
-        paddingTop: 16,
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 20,
-    },
-    doneButton: {
-        paddingVertical: 16,
-        alignItems: 'center' as const,
-        backgroundColor: '#f0f0f0',
-        borderTopWidth: 1,
-        borderTopColor: '#ddd',
-    },
-    doneText: {
-        fontSize: 18,
-        color: '#007AFF',
-        fontWeight: '600' as const,
-    },
+const formatDT = (d: Date | null) => {
+  if (!d) return '—';
+  return d.toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true });
+};
+
+const startOfDay = (d: Date) => { const n = new Date(d); n.setHours(0, 0, 0, 0); return n; };
+const startOfWeek = (d: Date) => { const n = new Date(d); n.setDate(n.getDate() - n.getDay()); n.setHours(0, 0, 0, 0); return n; };
+
+export default function DashboardScreen({ role, onTabPress }: Props) {
+  const user = auth.currentUser;
+  const [trips, setTrips] = useState<(TripFirestore & { id: string })[]>([]);
+  const [driverCount, setDriverCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = async () => {
+    try {
+      const [fetchedTrips, drivers] = await Promise.all([
+        role === 'driver' ? getTripsByUser(user?.uid ?? '') : getTrips(),
+        role !== 'driver' ? getDrivers() : Promise.resolve([]),
+      ]);
+      setTrips(fetchedTrips);
+      if (role !== 'driver') setDriverCount(drivers.length);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const onRefresh = () => { setRefreshing(true); load(); };
+
+  const now = new Date();
+  const todayTrips = trips.filter(t => t.departureTime && t.departureTime >= startOfDay(now));
+  const activeTrips = trips.filter(t => !t.arrivalTime);
+  const weekTrips = trips.filter(t => t.departureTime && t.departureTime >= startOfWeek(now));
+  const totalFuelWeek = weekTrips.reduce((sum, t) => sum + (parseFloat(t.fuelFilled) || 0), 0);
+  const recentTrips = trips.slice(0, 8);
+
+  const roleLabel = role === 'admin' ? 'Admin' : role === 'manager' ? 'Manager' : 'Driver';
+  const roleColor = role === 'admin' ? Colors.roleAdmin : role === 'manager' ? Colors.roleManager : Colors.roleDriver;
+  const roleLight = role === 'admin' ? Colors.roleAdminLight : role === 'manager' ? Colors.roleManagerLight : Colors.roleDriverLight;
+
+  const stats = role === 'driver'
+    ? [
+        { label: "Today's Trips", value: todayTrips.length, color: Colors.primary },
+        { label: 'This Week', value: weekTrips.length, color: Colors.success },
+        { label: 'Total Trips', value: trips.length, color: Colors.warning },
+        { label: 'Active Now', value: activeTrips.length, color: Colors.danger },
+      ]
+    : [
+        { label: 'Total Trips', value: trips.length, color: Colors.primary },
+        { label: 'Active Now', value: activeTrips.length, color: Colors.danger },
+        { label: 'Drivers', value: driverCount, color: Colors.success },
+        { label: 'Fuel (L) Week', value: Math.round(totalFuelWeek), color: Colors.warning },
+      ];
+
+  return (
+    <SafeAreaView style={s.safe}>
+      <ScrollView
+        contentContainerStyle={s.scroll}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
+      >
+        {/* Header */}
+        <View style={s.header}>
+          <View>
+            <Text style={s.greeting}>Good {now.getHours() < 12 ? 'morning' : now.getHours() < 17 ? 'afternoon' : 'evening'}</Text>
+            <Text style={s.email} numberOfLines={1}>{user?.email}</Text>
+          </View>
+          <View style={[s.roleBadge, { backgroundColor: roleLight }]}>
+            <Text style={[s.roleText, { color: roleColor }]}>{roleLabel}</Text>
+          </View>
+        </View>
+
+        {/* Quick Actions (Manager/Admin) */}
+        {role !== 'driver' && (
+          <View style={s.quickActions}>
+            <Text style={s.sectionTitle}>Quick Actions</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: Spacing[2] }}>
+              {[
+                { label: 'Add Trip', icon: '➕', tab: 'trips' as TabId },
+                { label: 'Reports', icon: '📊', tab: 'analytics' as TabId },
+                { label: 'Manage', icon: '⚙️', tab: 'manage' as TabId },
+              ].map(item => (
+                <TouchableOpacity
+                  key={item.tab}
+                  style={s.quickBtn}
+                  onPress={() => onTabPress(item.tab)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={s.quickBtnIcon}>{item.icon}</Text>
+                  <Text style={s.quickBtnLabel}>{item.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+
+        {/* Stats Grid */}
+        <Text style={s.sectionTitle}>Overview</Text>
+        {loading ? (
+          <View style={s.statsGrid}>
+            {[0,1,2,3].map(i => (
+              <View key={i} style={s.statCard}>
+                <SkeletonBox width={48} height={36} style={{ marginBottom: 8 }} />
+                <SkeletonBox width="70%" height={12} />
+              </View>
+            ))}
+          </View>
+        ) : (
+          <View style={s.statsGrid}>
+            {stats.map((st, i) => (
+              <View key={i} style={s.statCard}>
+                <Text style={[s.statValue, { color: st.color }]}>{st.value}</Text>
+                <Text style={s.statLabel}>{st.label}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* Recent Trips */}
+        <View style={s.sectionHeader}>
+          <Text style={s.sectionTitle}>Recent Trips</Text>
+          <TouchableOpacity onPress={() => onTabPress('trips')} activeOpacity={0.7}>
+            <Text style={s.seeAll}>See all</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={s.tripList}>
+          {loading ? (
+            [0,1,2,3].map(i => (
+              <View key={i} style={s.tripSkeleton}>
+                <SkeletonBox width={36} height={36} style={{ borderRadius: Radius.full, marginRight: 12 }} />
+                <View style={{ flex: 1, gap: 6 }}>
+                  <SkeletonBox width="60%" height={13} />
+                  <SkeletonBox width="80%" height={11} />
+                  <SkeletonBox width="50%" height={11} />
+                </View>
+              </View>
+            ))
+          ) : recentTrips.length === 0 ? (
+            <View style={s.empty}>
+              <Text style={s.emptyIcon}>🚛</Text>
+              <Text style={s.emptyText}>No trips yet</Text>
+              <Text style={s.emptySubText}>
+                {role === 'driver' ? 'Your assigned trips will appear here.' : 'Add a trip to get started.'}
+              </Text>
+            </View>
+          ) : (
+            recentTrips.map(trip => {
+              const delivered = !!trip.arrivalTime;
+              return (
+                <View key={trip.id} style={s.tripRow}>
+                  <View style={[s.tripDot, { backgroundColor: delivered ? Colors.success : Colors.primary }]} />
+                  <View style={s.tripContent}>
+                    <View style={s.tripTopRow}>
+                      <Text style={s.tripVehicle}>{trip.truck}</Text>
+                      <View style={[s.statusChip, { backgroundColor: delivered ? Colors.successLight : Colors.primaryLight }]}>
+                        <Text style={[s.statusText, { color: delivered ? Colors.success : Colors.primary }]}>
+                          {delivered ? 'Delivered' : 'Active'}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={s.tripRoute}>
+                      {trip.fromPlant || '—'} → {trip.toPlant || '—'}
+                    </Text>
+                    {trip.driverName ? (
+                      <Text style={s.tripMeta}>Driver: {trip.driverName}</Text>
+                    ) : null}
+                    <Text style={s.tripTime}>{formatDT(trip.departureTime)}</Text>
+                  </View>
+                </View>
+              );
+            })
+          )}
+        </View>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+const s = {
+  safe: { flex: 1, backgroundColor: Colors.background } as const,
+  scroll: { padding: Spacing[5], paddingBottom: Spacing[10] } as const,
+
+  header: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
+    marginBottom: Spacing[5],
+  },
+  greeting: { fontSize: FontSize.sm, color: Colors.textMuted, fontWeight: '500' as const },
+  email: { fontSize: FontSize.base, fontWeight: '700' as const, color: Colors.text, maxWidth: 220 },
+  roleBadge: {
+    paddingHorizontal: Spacing[3],
+    paddingVertical: 6,
+    borderRadius: Radius.full,
+  },
+  roleText: { fontSize: FontSize.xs, fontWeight: '700' as const, letterSpacing: 0.5, textTransform: 'uppercase' as const },
+
+  quickActions: { marginBottom: Spacing[5] } as const,
+  quickBtn: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    paddingVertical: Spacing[3],
+    paddingHorizontal: Spacing[4],
+    marginRight: Spacing[3],
+    alignItems: 'center' as const,
+    minWidth: 90,
+    ...Shadow.sm,
+  },
+  quickBtnIcon: { fontSize: 22, marginBottom: 4 },
+  quickBtnLabel: { fontSize: FontSize.xs, fontWeight: '600' as const, color: Colors.textSecondary },
+
+  sectionHeader: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
+    marginBottom: Spacing[3],
+  },
+  sectionTitle: { fontSize: FontSize.md, fontWeight: '700' as const, color: Colors.text, marginBottom: Spacing[3] },
+  seeAll: { fontSize: FontSize.sm, color: Colors.primary, fontWeight: '600' as const },
+
+  statsGrid: {
+    flexDirection: 'row' as const,
+    flexWrap: 'wrap' as const,
+    gap: Spacing[3],
+    marginBottom: Spacing[6],
+  },
+  statCard: {
+    backgroundColor: Colors.surface,
+    width: '47.5%' as const,
+    padding: Spacing[4],
+    borderRadius: Radius.lg,
+    ...Shadow.md,
+  },
+  statValue: { fontSize: FontSize['3xl'], fontWeight: '800' as const, letterSpacing: -1 },
+  statLabel: { fontSize: FontSize.sm, color: Colors.textSecondary, marginTop: Spacing[1], fontWeight: '500' as const },
+
+  tripList: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.lg,
+    paddingVertical: Spacing[2],
+    ...Shadow.md,
+    marginBottom: Spacing[4],
+  },
+  tripSkeleton: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    padding: Spacing[4],
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  tripRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'flex-start' as const,
+    padding: Spacing[4],
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  tripDot: {
+    width: 10,
+    height: 10,
+    borderRadius: Radius.full,
+    marginTop: 5,
+    marginRight: Spacing[3],
+  },
+  tripContent: { flex: 1 } as const,
+  tripTopRow: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
+    marginBottom: 4,
+  },
+  tripVehicle: { fontSize: FontSize.base, fontWeight: '700' as const, color: Colors.text },
+  statusChip: {
+    paddingHorizontal: Spacing[2],
+    paddingVertical: 2,
+    borderRadius: Radius.full,
+  },
+  statusText: { fontSize: FontSize.xs, fontWeight: '700' as const },
+  tripRoute: { fontSize: FontSize.sm, color: Colors.primary, fontWeight: '500' as const, marginBottom: 2 },
+  tripMeta: { fontSize: FontSize.xs, color: Colors.textSecondary, marginBottom: 2 },
+  tripTime: { fontSize: FontSize.xs, color: Colors.textMuted },
+
+  empty: {
+    alignItems: 'center' as const,
+    paddingVertical: Spacing[10],
+  },
+  emptyIcon: { fontSize: 40, marginBottom: Spacing[2] },
+  emptyText: { fontSize: FontSize.md, fontWeight: '600' as const, color: Colors.textSecondary },
+  emptySubText: { fontSize: FontSize.sm, color: Colors.textMuted, marginTop: Spacing[1], textAlign: 'center' as const },
 };

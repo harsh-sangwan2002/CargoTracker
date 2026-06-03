@@ -6,174 +6,241 @@ import {
   TouchableOpacity,
   Alert,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
 } from 'react-native';
-import StyleSheet from '../utils/styleShim'; // Assuming this is your custom StyleSheet shim
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { auth } from '../firebaseConfig'; // Path to your config file
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import type { RootStackParamList } from '../App';
-
-type LoginScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Login'>;
+import { auth } from '../firebaseConfig';
+import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const navigation = useNavigation<LoginScreenNavigationProp>();
+  const [emailFocused, setEmailFocused] = useState(false);
+  const [passFocused, setPassFocused] = useState(false);
+  const navigation = useNavigation<any>();
 
   const handleLogin = async () => {
-    if (!email || !password) {
-      Alert.alert('Error', 'Please enter email and password');
+    if (!email.trim() || !password) {
+      Alert.alert('Required', 'Please enter your email and password.');
       return;
     }
-
     setLoading(true);
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-      navigation.navigate('Dashboard'); // Or wherever you want to go after login
+      await signInWithEmailAndPassword(auth, email.trim(), password);
     } catch (err: any) {
-      let message = 'An error occurred. Please try again.';
-      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
-        message = 'Invalid email or password.';
-      } else if (err.code === 'auth/invalid-email') {
-        message = 'Invalid email address.';
-      } else if (err.message) {
-        message = err.message;
-      }
-      Alert.alert('Login Failed', message);
+      const map: Record<string, string> = {
+        'auth/user-not-found': 'No account found with this email.',
+        'auth/wrong-password': 'Incorrect password.',
+        'auth/invalid-email': 'Please enter a valid email address.',
+        'auth/invalid-credential': 'Invalid email or password.',
+        'auth/too-many-requests': 'Too many attempts. Try again later.',
+      };
+      Alert.alert('Login Failed', map[err.code] ?? err.message ?? 'Something went wrong.');
     } finally {
       setLoading(false);
     }
   };
 
-  const goToRegister = () => {
-    navigation.navigate('Register'); // You'll create this screen next
-  };
-
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.content}>
-        <Text style={styles.title}>Cargo Tracker</Text>
-        <Text style={styles.subtitle}>Truck Fleet Management</Text>
+    <SafeAreaView style={s.safe}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <ScrollView
+          contentContainerStyle={s.scroll}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Brand mark */}
+          <View style={s.brandContainer}>
+            <View style={s.logoBox}>
+              <Text style={s.logoText}>CT</Text>
+            </View>
+            <Text style={s.appName}>Cargo Tracker</Text>
+            <Text style={s.tagline}>Fleet Management Platform</Text>
+          </View>
 
-        <View style={styles.form}>
-          <TextInput
-            style={styles.input}
-            placeholder="Email"
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            keyboardType="email-address"
-            editable={!loading}
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="Password"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            editable={!loading}
-          />
+          {/* Card */}
+          <View style={s.card}>
+            <Text style={s.cardTitle}>Welcome back</Text>
+            <Text style={s.cardSub}>Sign in to your account</Text>
 
-          <TouchableOpacity
-            style={[styles.button, loading && styles.buttonDisabled]}
-            onPress={handleLogin}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.buttonText}>Login</Text>
-            )}
-          </TouchableOpacity>
+            <View style={s.field}>
+              <Text style={s.label}>Email address</Text>
+              <TextInput
+                style={[s.input, emailFocused && s.inputFocused]}
+                placeholder="you@example.com"
+                placeholderTextColor={Colors.textMuted}
+                value={email}
+                onChangeText={setEmail}
+                autoCapitalize="none"
+                keyboardType="email-address"
+                editable={!loading}
+                onFocus={() => setEmailFocused(true)}
+                onBlur={() => setEmailFocused(false)}
+                returnKeyType="next"
+              />
+            </View>
 
-          {/* Updated Register Link - Centered + Proper Spacing */}
-          <TouchableOpacity onPress={goToRegister} style={styles.registerLinkContainer}>
-            <Text style={styles.registerLinkText}>
-              Don't have an account? <Text style={styles.registerHighlight}>Register</Text>
-            </Text>
-          </TouchableOpacity>
-        </View>
+            <View style={s.field}>
+              <Text style={s.label}>Password</Text>
+              <TextInput
+                style={[s.input, passFocused && s.inputFocused]}
+                placeholder="Enter password"
+                placeholderTextColor={Colors.textMuted}
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry
+                editable={!loading}
+                onFocus={() => setPassFocused(true)}
+                onBlur={() => setPassFocused(false)}
+                returnKeyType="done"
+                onSubmitEditing={handleLogin}
+              />
+            </View>
 
-        <Text style={styles.hint}>Powered by Firebase Authentication</Text>
-      </View>
+            <TouchableOpacity
+              style={[s.btn, loading && s.btnDisabled]}
+              onPress={handleLogin}
+              disabled={loading}
+              activeOpacity={0.85}
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={s.btnText}>Sign In</Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={s.linkRow}
+              onPress={() => navigation.navigate('Register')}
+              activeOpacity={0.7}
+            >
+              <Text style={s.linkText}>
+                Don't have an account?{'  '}
+                <Text style={s.linkHighlight}>Create one</Text>
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
+const s = {
+  safe: { flex: 1, backgroundColor: Colors.background } as const,
+  scroll: {
+    flexGrow: 1,
+    justifyContent: 'center' as const,
+    paddingHorizontal: Spacing[5],
+    paddingVertical: Spacing[8],
   },
-  content: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 20,
+  brandContainer: {
+    alignItems: 'center' as const,
+    marginBottom: Spacing[8],
   },
-  title: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#1d4ed8',
-    marginBottom: 8,
+  logoBox: {
+    width: 64,
+    height: 64,
+    borderRadius: Radius.lg,
+    backgroundColor: Colors.primary,
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+    marginBottom: Spacing[3],
+    ...Shadow.md,
   },
-  subtitle: {
-    fontSize: 14,
-    color: '#6b7280',
-    marginBottom: 40,
+  logoText: {
+    color: '#fff',
+    fontSize: FontSize['2xl'],
+    fontWeight: '800' as const,
+    letterSpacing: 1,
   },
-  form: {
-    width: '100%',
-    maxWidth: 400,
+  appName: {
+    fontSize: FontSize['3xl'],
+    fontWeight: '700' as const,
+    color: Colors.text,
+    letterSpacing: -0.5,
+  },
+  tagline: {
+    fontSize: FontSize.sm,
+    color: Colors.textMuted,
+    marginTop: Spacing[1],
+  },
+  card: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.xl,
+    padding: Spacing[6],
+    ...Shadow.lg,
+  },
+  cardTitle: {
+    fontSize: FontSize.xl,
+    fontWeight: '700' as const,
+    color: Colors.text,
+    marginBottom: Spacing[1],
+  },
+  cardSub: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+    marginBottom: Spacing[6],
+  },
+  field: {
+    marginBottom: Spacing[4],
+  },
+  label: {
+    fontSize: FontSize.sm,
+    fontWeight: '600' as const,
+    color: Colors.textSecondary,
+    marginBottom: Spacing[2],
   },
   input: {
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    marginBottom: 16,
-    fontSize: 16,
-    backgroundColor: '#f9fafb',
-  },
-  button: {
-    backgroundColor: '#1d4ed8',
-    borderRadius: 8,
+    backgroundColor: Colors.surfaceAlt,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing[4],
     paddingVertical: 14,
-    alignItems: 'center',
-    marginTop: 8,
+    fontSize: FontSize.base,
+    color: Colors.text,
   },
-  buttonDisabled: {
-    opacity: 0.6,
+  inputFocused: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primaryLight,
   },
-  buttonText: {
+  btn: {
+    backgroundColor: Colors.primary,
+    borderRadius: Radius.md,
+    paddingVertical: 16,
+    alignItems: 'center' as const,
+    marginTop: Spacing[2],
+    ...Shadow.md,
+  },
+  btnDisabled: {
+    backgroundColor: Colors.disabled,
+  },
+  btnText: {
     color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
+    fontSize: FontSize.base,
+    fontWeight: '700' as const,
+    letterSpacing: 0.3,
   },
-
-  // New centered register link with proper spacing
-  registerLinkContainer: {
-    marginTop: 24,           // Adds nice space above the text
-    alignItems: 'center',    // Centers the text horizontally
+  linkRow: {
+    alignItems: 'center' as const,
+    marginTop: Spacing[5],
   },
-  registerLinkText: {
-    fontSize: 15,
-    color: '#4b5563',        // Gray color for the sentence
-    textAlign: 'center',
+  linkText: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
   },
-  registerHighlight: {
-    color: '#1d4ed8',        // Blue color for "Register"
-    fontWeight: '600',
-    textDecorationLine: 'underline',
+  linkHighlight: {
+    color: Colors.primary,
+    fontWeight: '700' as const,
   },
-
-  hint: {
-    fontSize: 12,
-    color: '#6b7280',
-    marginTop: 20,
-  },
-});
+};

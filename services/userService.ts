@@ -9,10 +9,11 @@ import {
   writeBatch,
   query,
   where,
-  serverTimestamp,
+  serverTimestamp
 } from 'firebase/firestore';
-import { db } from '../firebaseConfig';
-import { File } from 'expo-file-system';
+import {db} from '../firebaseConfig';
+import {File} from 'expo-file-system';
+import {getDrivers} from './driverService';
 
 export interface UserProfile {
   uid: string;
@@ -36,7 +37,7 @@ export const createUserProfile = async (
       uid,
       email: normalizeEmail(email),
       role,
-      createdAt: new Date(),
+      createdAt: new Date()
     });
   } catch (error) {
     console.error('Error creating user profile:', error);
@@ -48,7 +49,7 @@ export const getUserProfile = async (uid: string): Promise<UserProfile | null> =
   try {
     const userDocRef = doc(db, 'users', uid);
     const userDoc = await getDoc(userDocRef);
-    
+
     if (userDoc.exists()) {
       return userDoc.data() as UserProfile;
     }
@@ -62,7 +63,7 @@ export const getUserProfile = async (uid: string): Promise<UserProfile | null> =
 export const updateUserRole = async (uid: string, role: 'driver' | 'manager' | 'admin') => {
   try {
     const userDocRef = doc(db, 'users', uid);
-    await updateDoc(userDocRef, { role });
+    await updateDoc(userDocRef, {role});
   } catch (error) {
     console.error('Error updating user role:', error);
     throw error;
@@ -98,20 +99,13 @@ export const convertImageToBase64 = async (imageUri: string): Promise<string> =>
       return imageUri;
     }
 
-<<<<<<< HEAD
-    // Read file and convert to base64
-    const base64 = await FileSystem.readAsStringAsync(imageUri, {
-      encoding: 'base64' as any,
-    });
-=======
     // Read file and convert to base64 using the Expo SDK 54 File API.
     const imageFile = new File(imageUri);
     const base64 = await imageFile.base64();
->>>>>>> 0dd83a5 (Fixed UI and sanitized driver's data field)
 
     // Determine image type
     const imageType = imageUri.toLowerCase().endsWith('.png') ? 'png' : 'jpeg';
-    
+
     return `data:image/${imageType};base64,${base64}`;
   } catch (error) {
     console.error('Error converting image to base64:', error);
@@ -120,7 +114,7 @@ export const convertImageToBase64 = async (imageUri: string): Promise<string> =>
   }
 };
 
-const deleteDocsInBatches = async (docsToDelete: Array<{ ref: any }>) => {
+const deleteDocsInBatches = async (docsToDelete: Array<{ref: any}>) => {
   const BATCH_LIMIT = 450;
   for (let i = 0; i < docsToDelete.length; i += BATCH_LIMIT) {
     const batch = writeBatch(db);
@@ -132,15 +126,16 @@ const deleteDocsInBatches = async (docsToDelete: Array<{ ref: any }>) => {
 
 export const deleteUserAccountData = async (uid: string) => {
   const tripsRef = collection(db, 'trips');
-  const driversRef = collection(db, 'drivers');
 
-  const [tripsSnap, driversSnap] = await Promise.all([
+  const [tripsSnap, driversList] = await Promise.all([
     getDocs(query(tripsRef, where('userId', '==', uid))),
-    getDocs(query(driversRef, where('userId', '==', uid))),
+    getDrivers(uid)
   ]);
 
+  const driverRefs = driversList.map(d => ({ref: doc(db, 'drivers', d.id)}));
+
   await deleteDocsInBatches(tripsSnap.docs);
-  await deleteDocsInBatches(driversSnap.docs);
+  await deleteDocsInBatches(driverRefs);
 
   await deleteDoc(doc(usersRef, uid));
 };

@@ -4,652 +4,485 @@ import {
   Text,
   ScrollView,
   TouchableOpacity,
+  FlatList,
   Alert,
   ActivityIndicator,
-  SafeAreaView,
   Modal,
   Pressable,
   TextInput,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
-import {
-  collection,
-  getDocs,
-  doc,
-  updateDoc,
-  query,
-  where,
-} from 'firebase/firestore';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { collection, getDocs, doc, updateDoc, query, where } from 'firebase/firestore';
 import { db, auth } from '../firebaseConfig';
 import { useNavigation } from '@react-navigation/native';
 import { isAdmin, isManager } from '../services/userService';
+import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
 
-interface User {
+interface UserRecord {
   uid: string;
   email: string;
   role: 'driver' | 'manager' | 'admin';
   createdAt?: any;
 }
 
+const ROLE_CONFIG = {
+  admin: { color: Colors.roleAdmin, bg: Colors.roleAdminLight, label: 'Admin' },
+  manager: { color: Colors.roleManager, bg: Colors.roleManagerLight, label: 'Manager' },
+  driver: { color: Colors.roleDriver, bg: Colors.roleDriverLight, label: 'Driver' },
+};
+
 export default function UserManagementScreen() {
   const navigation = useNavigation<any>();
-  const [users, setUsers] = useState<User[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [isUserAdmin, setIsUserAdmin] = useState(false);
-  const [isUserManager, setIsUserManager] = useState(false);
-  const [selectedUser, setSelectedUser] = useState<User | null>(null);
-  const [showRoleModal, setShowRoleModal] = useState(false);
-  const [newRole, setNewRole] = useState<'driver' | 'manager' | 'admin'>('driver');
-  const [showAddUserModal, setShowAddUserModal] = useState(false);
-  const [newUserEmail, setNewUserEmail] = useState('');
-  const [newUserRole, setNewUserRole] = useState<'driver' | 'manager' | 'admin'>('driver');
-
   const currentUser = auth.currentUser;
+  const [users, setUsers] = useState<UserRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQ, setSearchQ] = useState('');
+  const [isUserAdmin, setIsUserAdmin] = useState(false);
+  const [roleModal, setRoleModal] = useState(false);
+  const [selected, setSelected] = useState<UserRecord | null>(null);
+  const [pendingRole, setPendingRole] = useState<UserRecord['role']>('driver');
+  const [addModal, setAddModal] = useState(false);
+  const [newEmail, setNewEmail] = useState('');
+  const [newRole, setNewRole] = useState<UserRecord['role']>('driver');
+  const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    checkAdminAndFetchUsers();
-  }, []);
+  useEffect(() => { init(); }, []);
 
-  const checkAdminAndFetchUsers = async () => {
-    if (!currentUser) {
-      Alert.alert('Error', 'Not authenticated');
+  const init = async () => {
+    if (!currentUser) { navigation.goBack(); return; }
+    const [adminStatus, managerStatus] = await Promise.all([
+      isAdmin(currentUser.uid),
+      isManager(currentUser.uid),
+    ]);
+    if (!adminStatus && !managerStatus) {
+      Alert.alert('Access Denied', 'Only admins and managers can access this screen.');
       navigation.goBack();
       return;
     }
-
-    try {
-      // Check if user is admin or manager
-      const adminStatus = await isAdmin(currentUser.uid);
-      const managerStatus = await isManager(currentUser.uid);
-      
-      if (!adminStatus && !managerStatus) {
-        Alert.alert('Access Denied', 'Only admins and managers can access this page');
-        navigation.goBack();
-        return;
-      }
-
-      setIsUserAdmin(adminStatus);
-      setIsUserManager(adminStatus || managerStatus); // Set true if either admin or manager
-      await fetchUsers();
-    } catch (error) {
-      console.error('Error checking admin/manager status:', error);
-      Alert.alert('Error', 'Failed to verify status');
-      navigation.goBack();
-    }
+    setIsUserAdmin(adminStatus);
+    fetchUsers();
   };
 
   const fetchUsers = async () => {
+    setLoading(true);
     try {
-      setLoading(true);
-      const usersCollection = collection(db, 'users');
-      const snapshot = await getDocs(usersCollection);
-      
-      const usersList: User[] = [];
-      snapshot.forEach((doc) => {
-        usersList.push({
-          uid: doc.id,
-          ...doc.data(),
-        } as User);
-      });
-
-      // Sort by email
-      usersList.sort((a, b) => a.email.localeCompare(b.email));
-      setUsers(usersList);
-    } catch (error) {
-      console.error('Error fetching users:', error);
-      Alert.alert('Error', 'Failed to fetch users');
+      const snap = await getDocs(collection(db, 'users'));
+      const list: UserRecord[] = snap.docs.map(d => ({ uid: d.id, ...d.data() } as UserRecord));
+      list.sort((a, b) => a.email.localeCompare(b.email));
+      setUsers(list);
+    } catch {
+      Alert.alert('Error', 'Failed to load users.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleRoleChange = async () => {
-    if (!selectedUser) return;
-
-    try {
-      const userRef = doc(db, 'users', selectedUser.uid);
-      await updateDoc(userRef, { role: newRole });
-
-      // Update local state
-      setUsers(users.map(u => 
-        u.uid === selectedUser.uid ? { ...u, role: newRole } : u
-      ));
-
-      Alert.alert('Success', `${selectedUser.email}'s role updated to ${newRole}`);
-      setShowRoleModal(false);
-      setSelectedUser(null);
-    } catch (error) {
-      console.error('Error updating role:', error);
-      Alert.alert('Error', 'Failed to update role');
-    }
+  const openRoleModal = (u: UserRecord) => {
+    setSelected(u);
+    setPendingRole(u.role);
+    setRoleModal(true);
   };
 
-  const openRoleModal = (user: User) => {
-    setSelectedUser(user);
-    setNewRole(user.role);
-    setShowRoleModal(true);
+  const handleRoleChange = async () => {
+    if (!selected) return;
+    setSaving(true);
+    try {
+      await updateDoc(doc(db, 'users', selected.uid), { role: pendingRole });
+      setUsers(prev => prev.map(u => u.uid === selected.uid ? { ...u, role: pendingRole } : u));
+      setRoleModal(false);
+      setSelected(null);
+    } catch {
+      Alert.alert('Error', 'Failed to update role.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleAddUser = async () => {
-    const email = newUserEmail.trim().toLowerCase();
-    if (!email) {
-      Alert.alert('Error', 'Please enter an email address');
-      return;
-    }
-
-    if (!currentUser?.uid) {
-      Alert.alert('Error', 'Not authenticated');
-      return;
-    }
-
-    if (!isUserAdmin) {
-      Alert.alert('Access Denied', 'Only admins can add users');
-      return;
-    }
-
+    const email = newEmail.trim().toLowerCase();
+    if (!email) { Alert.alert('Required', 'Please enter an email address.'); return; }
+    if (!isUserAdmin) { Alert.alert('Access Denied', 'Only admins can assign roles.'); return; }
+    setSaving(true);
     try {
-      const existingSnap = await getDocs(query(collection(db, 'users'), where('email', '==', email)));
-      if (!existingSnap.empty) {
-        const existing = existingSnap.docs[0];
-        await updateDoc(doc(db, 'users', existing.id), { role: newUserRole });
-
-        setUsers(users.map((u) => (u.uid === existing.id ? { ...u, role: newUserRole } : u)));
-        Alert.alert('Success', `Updated role for ${email} to ${newUserRole}`);
-      } else {
-        Alert.alert(
-          'User Not Found',
-          'This email has not registered yet. Ask the user to register first, then come back to set their role.'
-        );
+      const snap = await getDocs(query(collection(db, 'users'), where('email', '==', email)));
+      if (snap.empty) {
+        Alert.alert('Not Found', 'No account found for this email. The user must register first.');
         return;
       }
-
-      setNewUserEmail('');
-      setNewUserRole('driver');
-      setShowAddUserModal(false);
-    } catch (error) {
-      console.error('Error adding user:', error);
-      Alert.alert('Error', 'Failed to add user');
+      const docRef = snap.docs[0];
+      await updateDoc(doc(db, 'users', docRef.id), { role: newRole });
+      setUsers(prev => prev.map(u => u.uid === docRef.id ? { ...u, role: newRole } : u));
+      setAddModal(false);
+      setNewEmail('');
+      setNewRole('driver');
+      Alert.alert('Success', `Role updated for ${email}`);
+    } catch {
+      Alert.alert('Error', 'Failed to update user role.');
+    } finally {
+      setSaving(false);
     }
   };
 
-  const getRoleColor = (role: string) => {
-    switch (role) {
-      case 'admin':
-        return '#dc2626';
-      case 'manager':
-        return '#2563eb';
-      case 'driver':
-        return '#059669';
-      default:
-        return '#6b7280';
-    }
+  const filtered = users.filter(u =>
+    u.email.toLowerCase().includes(searchQ.toLowerCase()) ||
+    u.role.toLowerCase().includes(searchQ.toLowerCase())
+  );
+
+  const counts = {
+    admin: users.filter(u => u.role === 'admin').length,
+    manager: users.filter(u => u.role === 'manager').length,
+    driver: users.filter(u => u.role === 'driver').length,
   };
-
-  if (loading) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.centerContent}>
-          <ActivityIndicator size="large" color="#2563eb" />
-          <Text style={styles.loadingText}>Loading users...</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  if (!isUserAdmin && !isUserManager) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.centerContent}>
-          <Text style={styles.errorText}>Access Denied</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Text style={styles.backButtonIcon}>‹</Text>
+    <SafeAreaView style={s.safe}>
+      {/* Header */}
+      <View style={s.topBar}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={s.backBtn} activeOpacity={0.8}>
+          <Text style={s.backBtnText}>‹</Text>
         </TouchableOpacity>
-        <Text style={styles.title}>User Management</Text>
-        {isUserAdmin ? (
-          <TouchableOpacity
-            onPress={() => setShowAddUserModal(true)}
-            style={styles.addButton}
-          >
-            <Text style={styles.addButtonText}>+ Add User</Text>
+        <Text style={s.pageTitle}>Users & Roles</Text>
+        {isUserAdmin && (
+          <TouchableOpacity style={s.addBtn} onPress={() => { setNewEmail(''); setNewRole('driver'); setAddModal(true); }} activeOpacity={0.85}>
+            <Text style={s.addBtnText}>+ Assign</Text>
           </TouchableOpacity>
-        ) : (
-          <View style={{ width: 80 }} />
         )}
       </View>
 
-      <View style={styles.statsContainer}>
-        <View style={styles.statBox}>
-          <Text style={styles.statNumber}>{users.length}</Text>
-          <Text style={styles.statLabel}>Total Users</Text>
+      {/* Stats */}
+      <View style={s.statsRow}>
+        <View style={[s.statBox, { borderLeftColor: Colors.roleAdmin }]}>
+          <Text style={[s.statNum, { color: Colors.roleAdmin }]}>{counts.admin}</Text>
+          <Text style={s.statLbl}>Admins</Text>
         </View>
-        <View style={styles.statBox}>
-          <Text style={styles.statNumber}>
-            {users.filter(u => u.role === 'admin').length}
-          </Text>
-          <Text style={styles.statLabel}>Admins</Text>
+        <View style={[s.statBox, { borderLeftColor: Colors.roleManager }]}>
+          <Text style={[s.statNum, { color: Colors.roleManager }]}>{counts.manager}</Text>
+          <Text style={s.statLbl}>Managers</Text>
         </View>
-        <View style={styles.statBox}>
-          <Text style={styles.statNumber}>
-            {users.filter(u => u.role === 'manager').length}
-          </Text>
-          <Text style={styles.statLabel}>Managers</Text>
+        <View style={[s.statBox, { borderLeftColor: Colors.roleDriver }]}>
+          <Text style={[s.statNum, { color: Colors.roleDriver }]}>{counts.driver}</Text>
+          <Text style={s.statLbl}>Drivers</Text>
         </View>
-        <View style={styles.statBox}>
-          <Text style={styles.statNumber}>
-            {users.filter(u => u.role === 'driver').length}
-          </Text>
-          <Text style={styles.statLabel}>Drivers</Text>
+        <View style={[s.statBox, { borderLeftColor: Colors.primary }]}>
+          <Text style={[s.statNum, { color: Colors.primary }]}>{users.length}</Text>
+          <Text style={s.statLbl}>Total</Text>
         </View>
       </View>
 
-      <ScrollView style={styles.listContainer}>
-        {users.length === 0 ? (
-          <Text style={styles.emptyText}>No users found</Text>
-        ) : (
-          users.map((user) => (
-            <View key={user.uid} style={styles.userCard}>
-              <View style={styles.userInfo}>
-                <Text style={styles.userEmail}>{user.email}</Text>
-                <View style={[styles.roleTag, { backgroundColor: getRoleColor(user.role) + '20' }]}>
-                  <Text style={[styles.roleTagText, { color: getRoleColor(user.role) }]}>
-                    {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
-                  </Text>
-                </View>
-              </View>
-              <TouchableOpacity
-                style={styles.editButton}
-                onPress={() => openRoleModal(user)}
-              >
-                <Text style={styles.editButtonText}>Edit Role</Text>
-              </TouchableOpacity>
+      {/* Search */}
+      <View style={s.searchRow}>
+        <TextInput
+          style={s.search}
+          placeholder="Search by email or role..."
+          placeholderTextColor={Colors.textMuted}
+          value={searchQ}
+          onChangeText={setSearchQ}
+        />
+      </View>
+
+      {loading ? (
+        <View style={s.loaderCenter}><ActivityIndicator size="large" color={Colors.primary} /></View>
+      ) : (
+        <FlatList
+          data={filtered}
+          keyExtractor={item => item.uid}
+          contentContainerStyle={s.listContent}
+          showsVerticalScrollIndicator={false}
+          ListEmptyComponent={
+            <View style={s.empty}>
+              <Text style={s.emptyIcon}>👥</Text>
+              <Text style={s.emptyText}>No users found</Text>
             </View>
-          ))
-        )}
-      </ScrollView>
+          }
+          renderItem={({ item }) => {
+            const cfg = ROLE_CONFIG[item.role];
+            return (
+              <View style={s.card}>
+                <View style={[s.avatarCircle, { backgroundColor: cfg.bg }]}>
+                  <Text style={[s.avatarInitial, { color: cfg.color }]}>{item.email[0].toUpperCase()}</Text>
+                </View>
+                <View style={s.cardInfo}>
+                  <Text style={s.cardEmail} numberOfLines={1}>{item.email}</Text>
+                  <View style={[s.roleBadge, { backgroundColor: cfg.bg }]}>
+                    <Text style={[s.roleText, { color: cfg.color }]}>{cfg.label}</Text>
+                  </View>
+                </View>
+                <TouchableOpacity style={s.editRoleBtn} onPress={() => openRoleModal(item)} activeOpacity={0.85}>
+                  <Text style={s.editRoleBtnText}>Change Role</Text>
+                </TouchableOpacity>
+              </View>
+            );
+          }}
+        />
+      )}
 
       {/* Role Change Modal */}
-      <Modal
-        visible={showRoleModal}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setShowRoleModal(false)}
-      >
-        <Pressable
-          style={styles.modalOverlay}
-          onPress={() => setShowRoleModal(false)}
-        >
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>
-              Change Role for {selectedUser?.email}
-            </Text>
-
-            <View style={styles.pickerContainer}>
-              <Text style={styles.pickerLabel}>Select New Role:</Text>
-              <View style={styles.rolesContainer}>
-                {['driver', 'manager', 'admin'].map((role) => (
+      <Modal visible={roleModal} transparent animationType="fade" onRequestClose={() => setRoleModal(false)}>
+        <Pressable style={mo.overlay} onPress={() => !saving && setRoleModal(false)}>
+          <View style={mo.card} onStartShouldSetResponder={() => true}>
+            <Text style={mo.title}>Change Role</Text>
+            <Text style={mo.sub}>{selected?.email}</Text>
+            <View style={mo.roles}>
+              {(['driver', 'manager', 'admin'] as const).map(r => {
+                const cfg = ROLE_CONFIG[r];
+                const active = pendingRole === r;
+                return (
                   <TouchableOpacity
-                    key={role}
-                    style={[
-                      styles.roleOption,
-                      newRole === role && styles.roleOptionSelected,
-                    ]}
-                    onPress={() => setNewRole(role as 'driver' | 'manager' | 'admin')}
+                    key={r}
+                    style={[mo.roleOption, active && { backgroundColor: cfg.color, borderColor: cfg.color }]}
+                    onPress={() => setPendingRole(r)}
+                    activeOpacity={0.85}
                   >
-                    <Text
-                      style={[
-                        styles.roleOptionText,
-                        newRole === role && styles.roleOptionTextSelected,
-                      ]}
-                    >
-                      {role.charAt(0).toUpperCase() + role.slice(1)}
-                    </Text>
+                    <Text style={[mo.roleOptionText, active && { color: '#fff' }]}>{cfg.label}</Text>
                   </TouchableOpacity>
-                ))}
-              </View>
+                );
+              })}
             </View>
-
-            <View style={styles.modalButtonContainer}>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.cancelButton]}
-                onPress={() => setShowRoleModal(false)}
-              >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
+            <View style={mo.btns}>
+              <TouchableOpacity style={mo.cancelBtn} onPress={() => setRoleModal(false)} disabled={saving}>
+                <Text style={mo.cancelText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.confirmButton]}
-                onPress={handleRoleChange}
-              >
-                <Text style={styles.confirmButtonText}>Update Role</Text>
+              <TouchableOpacity style={mo.confirmBtn} onPress={handleRoleChange} disabled={saving} activeOpacity={0.85}>
+                {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={mo.confirmText}>Update</Text>}
               </TouchableOpacity>
             </View>
           </View>
         </Pressable>
       </Modal>
 
-      {/* Add User Modal */}
-      <Modal
-        visible={showAddUserModal}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setShowAddUserModal(false)}
-      >
-        <Pressable
-          style={styles.modalOverlay}
-          onPress={() => setShowAddUserModal(false)}
-        >
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Add New User</Text>
+      {/* Assign Role to existing user Modal */}
+      <Modal visible={addModal} transparent animationType="slide" onRequestClose={() => setAddModal(false)}>
+        <KeyboardAvoidingView style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+          <View style={mo.sheet}>
+            <View style={mo.handle} />
+            <Text style={mo.title}>Assign Role</Text>
+            <Text style={mo.sub}>The user must have already registered an account.</Text>
 
-            <View style={styles.pickerContainer}>
-              <Text style={styles.pickerLabel}>Email Address:</Text>
-              <TextInput
-                style={styles.textInput}
-                placeholder="user@example.com"
-                placeholderTextColor="#9ca3af"
-                value={newUserEmail}
-                onChangeText={setNewUserEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
-            </View>
+            <Text style={[mo.sub, { marginTop: Spacing[4], fontWeight: '600' as const, color: Colors.textSecondary }]}>Email address</Text>
+            <TextInput
+              style={mo.input}
+              placeholder="user@example.com"
+              placeholderTextColor={Colors.textMuted}
+              value={newEmail}
+              onChangeText={setNewEmail}
+              autoCapitalize="none"
+              keyboardType="email-address"
+            />
 
-            <View style={styles.pickerContainer}>
-              <Text style={styles.pickerLabel}>User Role:</Text>
-              <View style={styles.rolesContainer}>
-                {['driver', 'manager', 'admin'].map((role) => (
+            <Text style={[mo.sub, { marginTop: Spacing[3], fontWeight: '600' as const, color: Colors.textSecondary }]}>Role to assign</Text>
+            <View style={mo.roles}>
+              {(['driver', 'manager', 'admin'] as const).map(r => {
+                const cfg = ROLE_CONFIG[r];
+                const active = newRole === r;
+                return (
                   <TouchableOpacity
-                    key={role}
-                    style={[
-                      styles.roleOption,
-                      newUserRole === role && styles.roleOptionSelected,
-                    ]}
-                    onPress={() => setNewUserRole(role as 'driver' | 'manager' | 'admin')}
+                    key={r}
+                    style={[mo.roleOption, active && { backgroundColor: cfg.color, borderColor: cfg.color }]}
+                    onPress={() => setNewRole(r)}
+                    activeOpacity={0.85}
                   >
-                    <Text
-                      style={[
-                        styles.roleOptionText,
-                        newUserRole === role && styles.roleOptionTextSelected,
-                      ]}
-                    >
-                      {role.charAt(0).toUpperCase() + role.slice(1)}
-                    </Text>
+                    <Text style={[mo.roleOptionText, active && { color: '#fff' }]}>{cfg.label}</Text>
                   </TouchableOpacity>
-                ))}
-              </View>
+                );
+              })}
             </View>
 
-            <View style={styles.modalButtonContainer}>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.cancelButton]}
-                onPress={() => {
-                  setShowAddUserModal(false);
-                  setNewUserEmail('');
-                  setNewUserRole('driver');
-                }}
-              >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
+            <View style={mo.btns}>
+              <TouchableOpacity style={mo.cancelBtn} onPress={() => setAddModal(false)} disabled={saving}>
+                <Text style={mo.cancelText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.confirmButton]}
-                onPress={handleAddUser}
-              >
-                <Text style={styles.confirmButtonText}>Add User</Text>
+              <TouchableOpacity style={mo.confirmBtn} onPress={handleAddUser} disabled={saving} activeOpacity={0.85}>
+                {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={mo.confirmText}>Assign Role</Text>}
               </TouchableOpacity>
             </View>
           </View>
-        </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
 }
 
-const styles = {
-  container: {
-    flex: 1,
-    backgroundColor: '#f9fafb',
-  } as const,
-  header: {
+const s = {
+  safe: { flex: 1, backgroundColor: Colors.background } as const,
+  topBar: {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
     justifyContent: 'space-between' as const,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
+    paddingHorizontal: Spacing[5],
+    paddingTop: Spacing[4],
+    paddingBottom: Spacing[3],
   },
-  backButton: {
+  backBtn: {
     width: 40,
     height: 40,
-    borderRadius: 20,
-    backgroundColor: '#2563eb',
+    borderRadius: Radius.full,
+    backgroundColor: Colors.surface,
     justifyContent: 'center' as const,
     alignItems: 'center' as const,
+    ...Shadow.sm,
   },
-  backButtonIcon: {
-    color: '#fff',
-    fontSize: 30,
-    lineHeight: 32,
-    fontWeight: '600' as const,
+  backBtnText: { fontSize: 28, color: Colors.primary, fontWeight: '700' as const, lineHeight: 32 },
+  pageTitle: { fontSize: FontSize['2xl'], fontWeight: '800' as const, color: Colors.text },
+  addBtn: {
+    backgroundColor: Colors.primary,
+    paddingHorizontal: Spacing[3],
+    paddingVertical: Spacing[2],
+    borderRadius: Radius.md,
+    ...Shadow.sm,
   },
-  title: {
-    fontSize: 20,
-    fontWeight: '700' as const,
-    color: '#111827',
-  },
-  addButton: {
-    backgroundColor: '#10b981',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-  },
-  addButtonText: {
-    color: '#fff',
-    fontWeight: '600' as const,
-    fontSize: 13,
-  },
-  statsContainer: {
+  addBtnText: { color: '#fff', fontWeight: '700' as const, fontSize: FontSize.xs },
+
+  statsRow: {
     flexDirection: 'row' as const,
-    paddingHorizontal: 12,
-    paddingVertical: 16,
-    backgroundColor: '#fff',
-    gap: 8,
+    paddingHorizontal: Spacing[5],
+    paddingBottom: Spacing[3],
+    gap: Spacing[2],
   },
   statBox: {
     flex: 1,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    padding: Spacing[3],
+    borderLeftWidth: 3,
+    ...Shadow.sm,
+  },
+  statNum: { fontSize: FontSize.xl, fontWeight: '800' as const },
+  statLbl: { fontSize: FontSize.xs, color: Colors.textMuted, marginTop: 2, fontWeight: '500' as const },
+
+  searchRow: { paddingHorizontal: Spacing[5], paddingBottom: Spacing[3] } as const,
+  search: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing[4],
     paddingVertical: 12,
-    paddingHorizontal: 8,
-    borderRadius: 8,
-    alignItems: 'center' as const,
+    fontSize: FontSize.base,
+    color: Colors.text,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
   },
-  statNumber: {
-    fontSize: 18,
-    fontWeight: '700' as const,
-    color: '#2563eb',
-  },
-  statLabel: {
-    fontSize: 11,
-    color: '#6b7280',
-    marginTop: 4,
-    textAlign: 'center' as const,
-  },
-  listContainer: {
-    flex: 1,
-    paddingHorizontal: 16,
-    paddingTop: 12,
-  },
-  userCard: {
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    padding: 16,
-    marginBottom: 12,
+
+  loaderCenter: { flex: 1, justifyContent: 'center' as const, alignItems: 'center' as const } as const,
+  listContent: { paddingHorizontal: Spacing[5], paddingBottom: Spacing[10] } as const,
+
+  card: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.lg,
+    padding: Spacing[4],
+    marginBottom: Spacing[3],
     flexDirection: 'row' as const,
-    justifyContent: 'space-between' as const,
     alignItems: 'center' as const,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
+    ...Shadow.md,
   },
-  userInfo: {
-    flex: 1,
+  avatarCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+    marginRight: Spacing[3],
   },
-  userEmail: {
-    fontSize: 14,
-    fontWeight: '600' as const,
-    color: '#111827',
-    marginBottom: 8,
-  },
-  roleTag: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
+  avatarInitial: { fontSize: FontSize.lg, fontWeight: '800' as const },
+  cardInfo: { flex: 1 } as const,
+  cardEmail: { fontSize: FontSize.sm, fontWeight: '600' as const, color: Colors.text, marginBottom: 4 },
+  roleBadge: {
+    paddingHorizontal: Spacing[2],
+    paddingVertical: 3,
+    borderRadius: Radius.full,
     alignSelf: 'flex-start' as const,
   },
-  roleTagText: {
-    fontSize: 12,
-    fontWeight: '600' as const,
+  roleText: { fontSize: FontSize.xs, fontWeight: '700' as const },
+  editRoleBtn: {
+    backgroundColor: Colors.primaryLight,
+    paddingHorizontal: Spacing[3],
+    paddingVertical: 7,
+    borderRadius: Radius.md,
   },
-  editButton: {
-    backgroundColor: '#2563eb',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 6,
-  },
-  editButtonText: {
-    color: '#fff',
-    fontWeight: '600' as const,
-    fontSize: 13,
-  },
-  emptyText: {
-    textAlign: 'center' as const,
-    color: '#9ca3af',
-    fontSize: 16,
-    padding: 40,
-  },
-  centerContent: {
+  editRoleBtnText: { fontSize: FontSize.xs, color: Colors.primary, fontWeight: '700' as const },
+
+  empty: { alignItems: 'center' as const, paddingVertical: Spacing[12] },
+  emptyIcon: { fontSize: 48, marginBottom: Spacing[3] },
+  emptyText: { fontSize: FontSize.md, fontWeight: '700' as const, color: Colors.textSecondary },
+};
+
+const mo = {
+  overlay: {
     flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
     justifyContent: 'center' as const,
     alignItems: 'center' as const,
   },
-  loadingText: {
-    marginTop: 12,
-    color: '#6b7280',
-    fontSize: 14,
-  },
-  errorText: {
-    color: '#ef4444',
-    fontSize: 18,
-    fontWeight: '600' as const,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center' as const,
-    alignItems: 'center' as const,
-  },
-  modalContent: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 24,
-    width: '85%' as const,
+  card: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.xl,
+    padding: Spacing[6],
+    width: '88%' as const,
     maxWidth: 400,
+    ...Shadow.lg,
   },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '700' as const,
-    color: '#111827',
-    marginBottom: 20,
-    textAlign: 'center' as const,
+  sheet: {
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: Radius.xl,
+    borderTopRightRadius: Radius.xl,
+    padding: Spacing[6],
   },
-  pickerContainer: {
-    marginBottom: 20,
+  handle: {
+    width: 40,
+    height: 4,
+    backgroundColor: Colors.border,
+    borderRadius: 2,
+    alignSelf: 'center' as const,
+    marginBottom: Spacing[5],
   },
-  pickerLabel: {
-    fontSize: 14,
-    fontWeight: '600' as const,
-    color: '#374151',
-    marginBottom: 12,
+  title: { fontSize: FontSize.xl, fontWeight: '800' as const, color: Colors.text, marginBottom: Spacing[1] },
+  sub: { fontSize: FontSize.sm, color: Colors.textMuted, marginBottom: Spacing[4] },
+  input: {
+    backgroundColor: Colors.surfaceAlt,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing[4],
+    paddingVertical: 14,
+    fontSize: FontSize.base,
+    color: Colors.text,
+    marginBottom: Spacing[4],
+    marginTop: Spacing[2],
   },
-  rolesContainer: {
+  roles: {
     flexDirection: 'row' as const,
-    gap: 10,
+    gap: Spacing[2],
+    marginBottom: Spacing[5],
+    marginTop: Spacing[2],
   },
   roleOption: {
     flex: 1,
     paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderRadius: 8,
+    borderRadius: Radius.md,
     borderWidth: 2,
-    borderColor: '#d1d5db',
-    backgroundColor: '#f9fafb',
+    borderColor: Colors.border,
     alignItems: 'center' as const,
+    backgroundColor: Colors.surfaceAlt,
   },
-  roleOptionSelected: {
-    backgroundColor: '#2563eb',
-    borderColor: '#2563eb',
-  },
-  roleOptionText: {
-    fontSize: 13,
-    fontWeight: '600' as const,
-    color: '#374151',
-  },
-  roleOptionTextSelected: {
-    color: '#fff',
-  },
-  pickerWrapper: {
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    borderRadius: 8,
-    backgroundColor: '#f9fafb',
-    overflow: 'hidden' as const,
-  },
-  picker: {
-    height: 50,
-    width: '100%' as const,
-    color: '#111827',
-  },
-  modalButtonContainer: {
-    flexDirection: 'row' as const,
-    gap: 12,
-  },
-  modalButton: {
+  roleOptionText: { fontSize: FontSize.sm, fontWeight: '700' as const, color: Colors.textSecondary },
+  btns: { flexDirection: 'row' as const, gap: Spacing[3] },
+  cancelBtn: {
     flex: 1,
-    paddingVertical: 12,
-    borderRadius: 8,
+    backgroundColor: Colors.surfaceAlt,
+    borderRadius: Radius.md,
+    paddingVertical: 14,
     alignItems: 'center' as const,
-  },
-  cancelButton: {
-    backgroundColor: '#e5e7eb',
-  },
-  confirmButton: {
-    backgroundColor: '#2563eb',
-  },
-  cancelButtonText: {
-    color: '#374151',
-    fontWeight: '600' as const,
-    fontSize: 14,
-  },
-  confirmButtonText: {
-    color: '#fff',
-    fontWeight: '600' as const,
-    fontSize: 14,
-  },
-  textInput: {
     borderWidth: 1,
-    borderColor: '#d1d5db',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: '#111827',
-    backgroundColor: '#f9fafb',
-    marginBottom: 16,
+    borderColor: Colors.border,
   },
+  cancelText: { color: Colors.textSecondary, fontWeight: '600' as const, fontSize: FontSize.base },
+  confirmBtn: {
+    flex: 1,
+    backgroundColor: Colors.primary,
+    borderRadius: Radius.md,
+    paddingVertical: 14,
+    alignItems: 'center' as const,
+    ...Shadow.sm,
+  },
+  confirmText: { color: '#fff', fontWeight: '700' as const, fontSize: FontSize.base },
 };
