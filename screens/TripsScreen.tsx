@@ -191,8 +191,8 @@ const tripToForm = (t: TripFirestore & { id: string }): FormState => ({
 export default function TripsScreen({ role }: Props) {
   const user = auth.currentUser;
   const [trips, setTrips] = useState<(TripFirestore & { id: string })[]>([]);
-  const [displayedTrips, setDisplayedTrips] = useState<(TripFirestore & { id: string })[]>([]);
-  const [page, setPage] = useState(1);
+  const [displayCount, setDisplayCount] = useState(PAGE_SIZE);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQ, setSearchQ] = useState('');
@@ -241,19 +241,32 @@ export default function TripsScreen({ role }: Props) {
 
   useEffect(() => { loadAll(); }, []);
 
-  // Filter + paginate
-  useEffect(() => {
-    let filtered = trips;
+  // Reset display count when search or filter changes
+  useEffect(() => { setDisplayCount(PAGE_SIZE); }, [searchQ, statusFilter]);
+
+  // Derive filtered + displayed inline (avoids stale state)
+  const filteredTrips = (() => {
+    let f = trips;
     if (searchQ.trim()) {
       const q = searchQ.toLowerCase();
-      filtered = filtered.filter(t =>
+      f = f.filter(t =>
         t.truck.toLowerCase().includes(q) || t.driverName.toLowerCase().includes(q)
       );
     }
-    if (statusFilter === 'active') filtered = filtered.filter(t => !t.arrivalTime);
-    if (statusFilter === 'delivered') filtered = filtered.filter(t => !!t.arrivalTime);
-    setDisplayedTrips(filtered.slice(0, page * PAGE_SIZE));
-  }, [trips, searchQ, statusFilter, page]);
+    if (statusFilter === 'active') f = f.filter(t => !t.arrivalTime);
+    if (statusFilter === 'delivered') f = f.filter(t => !!t.arrivalTime);
+    return f;
+  })();
+  const displayedTrips = filteredTrips.slice(0, displayCount);
+
+  const handleEndReached = () => {
+    if (loadingMore || displayCount >= filteredTrips.length) return;
+    setLoadingMore(true);
+    setTimeout(() => {
+      setDisplayCount(prev => prev + PAGE_SIZE);
+      setLoadingMore(false);
+    }, 350);
+  };
 
   const setField = (key: keyof FormState, val: string | Date | null) =>
     setForm(prev => ({ ...prev, [key]: val }));
@@ -393,7 +406,7 @@ export default function TripsScreen({ role }: Props) {
   const allCount = trips.length;
   const activeCount = trips.filter(t => !t.arrivalTime).length;
   const delivCount = trips.filter(t => !!t.arrivalTime).length;
-  const hasMore = displayedTrips.length < (statusFilter === 'all' ? trips.length : displayedTrips.length);
+  const hasReachedEnd = displayedTrips.length >= filteredTrips.length && filteredTrips.length > 0;
 
   return (
     <SafeAreaView style={s.safe}>
@@ -412,7 +425,7 @@ export default function TripsScreen({ role }: Props) {
           placeholder="Search vehicle or driver..."
           placeholderTextColor={Colors.textMuted}
           value={searchQ}
-          onChangeText={t => { setSearchQ(t); setPage(1); }}
+          onChangeText={t => { setSearchQ(t); }}
           returnKeyType="search"
         />
       </View>
@@ -427,7 +440,7 @@ export default function TripsScreen({ role }: Props) {
           <TouchableOpacity
             key={tab.key}
             style={[s.filterTab, statusFilter === tab.key && s.filterTabActive]}
-            onPress={() => { setStatusFilter(tab.key); setPage(1); }}
+            onPress={() => { setStatusFilter(tab.key); }}
             activeOpacity={0.8}
           >
             <Text style={[s.filterTabText, statusFilter === tab.key && s.filterTabTextActive]}>
@@ -452,10 +465,12 @@ export default function TripsScreen({ role }: Props) {
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
-              onRefresh={() => { setRefreshing(true); setPage(1); loadAll(); }}
+              onRefresh={() => { setRefreshing(true); setDisplayCount(PAGE_SIZE); loadAll(); }}
               tintColor={Colors.primary}
             />
           }
+          onEndReached={handleEndReached}
+          onEndReachedThreshold={0.3}
           ListEmptyComponent={
             <View style={s.empty}>
               <Text style={s.emptyIcon}>🚛</Text>
@@ -466,10 +481,17 @@ export default function TripsScreen({ role }: Props) {
             </View>
           }
           ListFooterComponent={
-            hasMore ? (
-              <TouchableOpacity style={s.loadMoreBtn} onPress={() => setPage(p => p + 1)} activeOpacity={0.8}>
-                <Text style={s.loadMoreText}>Load More</Text>
-              </TouchableOpacity>
+            loadingMore ? (
+              <View style={s.footerLoader}>
+                <ActivityIndicator size="small" color={Colors.primary} />
+                <Text style={s.footerLoaderText}>Loading more trips...</Text>
+              </View>
+            ) : hasReachedEnd ? (
+              <View style={s.footerEnd}>
+                <View style={s.footerEndLine} />
+                <Text style={s.footerEndText}>You've reached the last trip</Text>
+                <View style={s.footerEndLine} />
+              </View>
             ) : null
           }
           renderItem={({ item }) => {
@@ -864,16 +886,23 @@ const s = {
   cardMeta: { flexDirection: 'row' as const, gap: Spacing[4], marginTop: 2 },
   metaText: { fontSize: FontSize.xs, color: Colors.textSecondary },
 
-  loadMoreBtn: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.md,
-    paddingVertical: 14,
+  footerLoader: {
+    flexDirection: 'row' as const,
     alignItems: 'center' as const,
-    marginTop: Spacing[2],
-    borderWidth: 1,
-    borderColor: Colors.border,
+    justifyContent: 'center' as const,
+    paddingVertical: Spacing[5],
+    gap: Spacing[2],
   },
-  loadMoreText: { color: Colors.primary, fontWeight: '700' as const, fontSize: FontSize.base },
+  footerLoaderText: { fontSize: FontSize.sm, color: Colors.textSecondary },
+  footerEnd: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    paddingVertical: Spacing[5],
+    paddingHorizontal: Spacing[5],
+    gap: Spacing[3],
+  },
+  footerEndLine: { flex: 1, height: 1, backgroundColor: Colors.border },
+  footerEndText: { fontSize: FontSize.xs, color: Colors.textMuted, fontWeight: '600' as const, textAlign: 'center' as const },
 
   empty: {
     alignItems: 'center' as const,

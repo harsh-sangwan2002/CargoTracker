@@ -13,6 +13,7 @@ import MainTabsScreen from './screens/MainTabsScreen';
 import DriverManagementScreen from './screens/DriverManagementScreen';
 import UserManagementScreen from './screens/UserManagementScreen';
 import PlantManagementScreen from './screens/PlantManagementScreen';
+import LiveMapScreen from './screens/LiveMapScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -23,6 +24,7 @@ export type RootStackParamList = {
   DriverManagement: undefined;
   UserManagement: undefined;
   PlantManagement: undefined;
+  LiveMap: undefined;
 };
 
 export default function App() {
@@ -62,6 +64,11 @@ export default function App() {
             <Stack.Screen
               name="PlantManagement"
               component={PlantManagementScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="LiveMap"
+              component={LiveMapScreen}
               options={{ animation: 'slide_from_right' }}
             />
           </>

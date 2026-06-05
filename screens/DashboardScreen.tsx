@@ -6,11 +6,15 @@ import {
   TouchableOpacity,
   Animated,
   RefreshControl,
+  Switch,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as Location from 'expo-location';
 import { auth } from '../firebaseConfig';
 import { getTrips, getTripsByUser, TripFirestore } from '../services/tripService';
 import { getDrivers } from '../services/driverService';
+import { updateDriverLocation, clearDriverTracking } from '../services/locationService';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
 import type { UserRole, TabId } from './MainTabsScreen';
 
@@ -53,6 +57,46 @@ export default function DashboardScreen({ role, onTabPress }: Props) {
   const [driverCount, setDriverCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [isTracking, setIsTracking] = useState(false);
+  const locationWatcher = useRef<Location.LocationSubscription | null>(null);
+
+  // Stop tracking on unmount
+  useEffect(() => {
+    return () => {
+      if (locationWatcher.current) locationWatcher.current.remove();
+      if (user && role === 'driver') clearDriverTracking(user.uid).catch(() => {});
+    };
+  }, []);
+
+  const startTracking = async () => {
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission denied', 'Location permission is required to share your position.');
+      return;
+    }
+    const activeTrip = trips.find(t => !t.arrivalTime);
+    locationWatcher.current = await Location.watchPositionAsync(
+      { accuracy: Location.Accuracy.High, timeInterval: 10000, distanceInterval: 50 },
+      (pos) => {
+        if (!user) return;
+        updateDriverLocation(user.uid, {
+          driverName: user.displayName || user.email || 'Driver',
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          updatedAt: Date.now(),
+          isTracking: true,
+          tripRoute: activeTrip ? `${activeTrip.fromPlant || '?'} → ${activeTrip.toPlant || '?'}` : undefined,
+        }).catch(() => {});
+      }
+    );
+    setIsTracking(true);
+  };
+
+  const stopTracking = () => {
+    if (locationWatcher.current) { locationWatcher.current.remove(); locationWatcher.current = null; }
+    if (user) clearDriverTracking(user.uid).catch(() => {});
+    setIsTracking(false);
+  };
 
   const load = async () => {
     try {
@@ -138,6 +182,46 @@ export default function DashboardScreen({ role, onTabPress }: Props) {
                 </TouchableOpacity>
               ))}
             </ScrollView>
+          </View>
+        )}
+
+        {/* Driver: Active Trip Card */}
+        {role === 'driver' && (() => {
+          const activeTrip = trips.find(t => !t.arrivalTime);
+          if (!activeTrip) return null;
+          return (
+            <View style={s.activeTripCard}>
+              <View style={s.activeTripHeader}>
+                <View style={s.activeDot} />
+                <Text style={s.activeTripLabel}>Active Trip</Text>
+                <View style={[s.statusChip, { backgroundColor: Colors.successLight }]}>
+                  <Text style={[s.statusText, { color: Colors.success }]}>En Route</Text>
+                </View>
+              </View>
+              <Text style={s.activeTripRoute}>{activeTrip.fromPlant || '—'}  →  {activeTrip.toPlant || '—'}</Text>
+              <View style={s.activeTripMeta}>
+                <Text style={s.metaText}>🚛  {activeTrip.truck}</Text>
+                <Text style={s.metaText}>⛽  {activeTrip.fuelFilled || '—'} L</Text>
+              </View>
+            </View>
+          );
+        })()}
+
+        {/* Driver: GPS Tracking Card */}
+        {role === 'driver' && (
+          <View style={s.trackCard}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.trackTitle}>Live GPS Tracking</Text>
+              <Text style={s.trackSub}>
+                {isTracking ? '📡  Sharing your location with admin' : 'Share your location when on a trip'}
+              </Text>
+            </View>
+            <Switch
+              value={isTracking}
+              onValueChange={v => v ? startTracking() : stopTracking()}
+              trackColor={{ false: Colors.border, true: Colors.primary + '66' }}
+              thumbColor={isTracking ? Colors.primary : Colors.textMuted}
+            />
           </View>
         )}
 
@@ -242,6 +326,34 @@ const s = {
     borderRadius: Radius.full,
   },
   roleText: { fontSize: FontSize.xs, fontWeight: '700' as const, letterSpacing: 0.5, textTransform: 'uppercase' as const },
+
+  activeTripCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.lg,
+    padding: Spacing[4],
+    marginBottom: Spacing[4],
+    borderLeftWidth: 4,
+    borderLeftColor: Colors.success,
+    ...Shadow.md,
+  },
+  activeTripHeader: { flexDirection: 'row' as const, alignItems: 'center' as const, marginBottom: Spacing[2] },
+  activeDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.success, marginRight: Spacing[2] },
+  activeTripLabel: { flex: 1, fontSize: FontSize.sm, fontWeight: '700' as const, color: Colors.success, textTransform: 'uppercase' as const, letterSpacing: 0.5 },
+  activeTripRoute: { fontSize: FontSize.lg, fontWeight: '800' as const, color: Colors.text, marginBottom: Spacing[3], letterSpacing: -0.3 },
+  activeTripMeta: { flexDirection: 'row' as const, gap: Spacing[4] },
+  metaText: { fontSize: FontSize.sm, color: Colors.textSecondary, fontWeight: '500' as const },
+
+  trackCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.lg,
+    padding: Spacing[4],
+    marginBottom: Spacing[5],
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    ...Shadow.sm,
+  },
+  trackTitle: { fontSize: FontSize.base, fontWeight: '700' as const, color: Colors.text, marginBottom: 3 },
+  trackSub: { fontSize: FontSize.xs, color: Colors.textSecondary },
 
   quickActions: { marginBottom: Spacing[5] } as const,
   quickBtn: {

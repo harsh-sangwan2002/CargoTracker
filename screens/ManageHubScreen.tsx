@@ -20,6 +20,14 @@ interface ManageItem {
 
 const ITEMS: ManageItem[] = [
   {
+    title: 'Live Driver Map',
+    subtitle: 'View real-time GPS locations of active drivers',
+    icon: '🗺️',
+    screen: 'LiveMap',
+    color: Colors.info,
+    roles: ['manager', 'admin'],
+  },
+  {
     title: 'Drivers',
     subtitle: 'Add, view, edit and remove drivers',
     icon: '🚗',

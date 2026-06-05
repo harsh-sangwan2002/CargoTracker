@@ -5,6 +5,7 @@ import { auth } from '../firebaseConfig';
 import { getUserProfile } from '../services/userService';
 import { Colors, FontSize, Shadow } from '../utils/theme';
 import DashboardScreen from './DashboardScreen';
+import DriverHomeScreen from './DriverHomeScreen';
 import TripsScreen from './TripsScreen';
 import AnalyticsScreen from './AnalyticsScreen';
 import ManageHubScreen from './ManageHubScreen';
@@ -59,12 +60,18 @@ export default function MainTabsScreen() {
 
   const renderContent = () => {
     switch (activeTab) {
-      case 'home': return <DashboardScreen role={role} onTabPress={setActiveTab} />;
+      case 'home':
+        return role === 'driver'
+          ? <DriverHomeScreen onTabPress={setActiveTab} />
+          : <DashboardScreen role={role} onTabPress={setActiveTab} />;
       case 'trips': return <TripsScreen role={role} />;
       case 'analytics': return <AnalyticsScreen role={role} />;
       case 'manage': return <ManageHubScreen role={role} />;
       case 'profile': return <ProfileScreen role={role} />;
-      default: return <DashboardScreen role={role} onTabPress={setActiveTab} />;
+      default:
+        return role === 'driver'
+          ? <DriverHomeScreen onTabPress={setActiveTab} />
+          : <DashboardScreen role={role} onTabPress={setActiveTab} />;
     }
   };
 

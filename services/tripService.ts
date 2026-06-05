@@ -98,6 +98,14 @@ export const updateTrip = async (id: string, data: Partial<TripFirestore>) => {
   await updateDoc(ref, data);
 };
 
+export const startTrip = async (id: string) => {
+  await updateDoc(doc(db, 'trips', id), { departureTime: new Date(), status: 'active' });
+};
+
+export const endTrip = async (id: string) => {
+  await updateDoc(doc(db, 'trips', id), { arrivalTime: new Date(), status: 'completed' });
+};
+
 export const deleteTrip = async (id: string) => {
   const ref = doc(db, 'trips', id);
   await deleteDoc(ref);
