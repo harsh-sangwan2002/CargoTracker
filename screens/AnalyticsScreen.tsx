@@ -17,6 +17,7 @@ import {auth} from '../firebaseConfig';
 import {getTrips, getTripsByUser, TripFirestore} from '../services/tripService';
 import {getDrivers, Driver} from '../services/driverService';
 import {Colors, FontSize, Radius, Shadow, Spacing} from '../utils/theme';
+import {ShimmerStatsRow, ShimmerList} from '../components/Shimmer';
 import type {UserRole} from './MainTabsScreen';
 
 interface Props {
@@ -479,9 +480,9 @@ export default function AnalyticsScreen({role}: Props) {
         </View>
 
         {loading ? (
-          <View style={s.loaderCenter}>
-            <ActivityIndicator size="large" color={Colors.primary} />
-            <Text style={s.loadingText}>Calculating...</Text>
+          <View style={{marginTop: Spacing[4]}}>
+            <ShimmerStatsRow />
+            <ShimmerList count={4} />
           </View>
         ) : (
           <Pressable onPress={() => setShowDriverDropdown(false)}>

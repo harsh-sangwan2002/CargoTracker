@@ -8,6 +8,7 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
+import { getCache, setCache, clearCache, TTL } from '../utils/cache';
 
 export interface Driver {
   fullName: string;
@@ -23,113 +24,60 @@ export interface Driver {
 }
 
 const driversRef = collection(db, 'drivers');
+const CACHE_KEY = 'drivers_all';
 
 export const addDriver = async (driver: Omit<Driver, 'createdAt' | 'updatedAt'>) => {
-  try {
-    console.log('📝 Adding driver:', driver);
-    const docRef = await addDoc(driversRef, {
-      ...driver,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-    console.log('✅ Driver added with ID:', docRef.id);
-    return docRef.id;
-  } catch (error) {
-    console.error('❌ Error adding driver:', error);
-    throw error;
-  }
+  const docRef = await addDoc(driversRef, {
+    ...driver,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  clearCache(CACHE_KEY);
+  return docRef.id;
 };
 
-export const getDrivers = async (userId?: string) => {
+export const getDrivers = async (userId?: string): Promise<(Driver & { id: string })[]> => {
   try {
-    console.log('🔍 Starting getDrivers - userId:', userId);
-    
-    // Get all drivers without any complex queries
-    console.log('📡 Calling getDocs on driversRef...');
-    const snapshot = await getDocs(driversRef);
-    
-    console.log('📦 Snapshot received, total docs:', snapshot.docs.length);
+    const cached = await getCache<(Driver & { id: string })[]>(CACHE_KEY);
+    const all: (Driver & { id: string })[] = cached ?? await (async () => {
+      const snapshot = await getDocs(driversRef);
+      const drivers = snapshot.docs.map(docSnap => {
+        const data = docSnap.data();
+        return {
+          id: docSnap.id,
+          fullName: data.fullName || '',
+          age: data.age || 0,
+          address: data.address || '',
+          aadhaarCard: data.aadhaarCard || '',
+          panCard: data.panCard || '',
+          vehicleOwned: data.vehicleOwned || '',
+          photoUrl: data.photoUrl || '',
+          userId: data.userId || '',
+          createdAt: data.createdAt,
+          updatedAt: data.updatedAt,
+        } as Driver & { id: string };
+      });
+      setCache(CACHE_KEY, drivers, TTL.MEDIUM);
+      return drivers;
+    })();
 
-    const drivers = snapshot.docs.map(docSnap => {
-      const data = docSnap.data();
-      return {
-        id: docSnap.id,
-        fullName: data.fullName || '',
-        age: data.age || 0,
-        address: data.address || '',
-        aadhaarCard: data.aadhaarCard || '',
-        panCard: data.panCard || '',
-        vehicleOwned: data.vehicleOwned || '',
-        photoUrl: data.photoUrl || '',
-        userId: data.userId || '',
-        createdAt: data.createdAt,
-        updatedAt: data.updatedAt,
-      };
-    }) as (Driver & { id: string })[];
-
-    console.log('✅ Total drivers:', drivers.length);
-
-    // Filter by userId if provided
-    if (userId) {
-      const filtered = drivers.filter(d => d.userId === userId);
-      console.log(`🔎 Filtered by userId: ${drivers.length} -> ${filtered.length}`);
-      return filtered;
-    }
-
-    return drivers;
-  } catch (error: any) {
-    console.error('❌ ERROR in getDrivers:', {
-      message: error.message,
-      code: error.code,
-    });
+    return userId ? all.filter(d => d.userId === userId) : all;
+  } catch {
     return [];
   }
 };
 
-export const getDriverById = async (driverId: string) => {
-  try {
-    const docRef = doc(db, 'drivers', driverId);
-    const snapshot = await getDocs(driversRef);
-    const driverDoc = snapshot.docs.find(doc => doc.id === driverId);
-    
-    if (driverDoc) {
-      const data = driverDoc.data();
-      if (data) {
-        return {
-          id: driverDoc.id,
-          ...data,
-        } as Driver & { id: string };
-      }
-    }
-    return null;
-  } catch (error) {
-    console.error('Error getting driver:', error);
-    throw error;
-  }
+export const getDriverById = async (driverId: string): Promise<(Driver & { id: string }) | null> => {
+  const all = await getDrivers();
+  return all.find(d => d.id === driverId) ?? null;
 };
 
-export const updateDriver = async (
-  driverId: string,
-  data: Partial<Driver>
-) => {
-  try {
-    const ref = doc(db, 'drivers', driverId);
-    await updateDoc(ref, {
-      ...data,
-      updatedAt: serverTimestamp(),
-    });
-  } catch (error) {
-    console.error('Error updating driver:', error);
-    throw error;
-  }
+export const updateDriver = async (driverId: string, data: Partial<Driver>) => {
+  await updateDoc(doc(db, 'drivers', driverId), { ...data, updatedAt: serverTimestamp() });
+  clearCache(CACHE_KEY);
 };
 
 export const deleteDriver = async (driverId: string) => {
-  try {
-    const ref = doc(db, 'drivers', driverId);
-    await deleteDoc(ref);
-  } catch (error) {
-    console.error('Error deleting driver:', error);
-    throw error;
-  }
+  await deleteDoc(doc(db, 'drivers', driverId));
+  clearCache(CACHE_KEY);
 };

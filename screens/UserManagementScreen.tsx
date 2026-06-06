@@ -19,6 +19,7 @@ import { db, auth } from '../firebaseConfig';
 import { useNavigation } from '@react-navigation/native';
 import { isAdmin, isManager } from '../services/userService';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
+import { ShimmerRow } from '../components/Shimmer';
 
 interface UserRecord {
   uid: string;
@@ -183,7 +184,9 @@ export default function UserManagementScreen() {
       </View>
 
       {loading ? (
-        <View style={s.loaderCenter}><ActivityIndicator size="large" color={Colors.primary} /></View>
+        <View style={{ padding: Spacing[3] }}>
+          {[0,1,2,3,4].map(i => <ShimmerRow key={i} />)}
+        </View>
       ) : (
         <FlatList
           data={filtered}

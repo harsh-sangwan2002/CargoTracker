@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { auth } from '../firebaseConfig';
 import { getUserProfile } from '../services/userService';
 import { Colors, FontSize, Shadow } from '../utils/theme';
@@ -36,14 +37,20 @@ export default function MainTabsScreen() {
   const user = auth.currentUser;
 
   useEffect(() => {
-    if (user?.uid) {
-      getUserProfile(user.uid).then(profile => {
-        if (profile?.role) setRole(profile.role as UserRole);
-        setLoadingRole(false);
-      }).catch(() => setLoadingRole(false));
-    } else {
+    if (!user?.uid) { setLoadingRole(false); return; }
+    const cacheKey = `ct_role_${user.uid}`;
+    // Load cached role instantly (no spinner on re-open)
+    AsyncStorage.getItem(cacheKey).then(cached => {
+      if (cached) { setRole(cached as UserRole); setLoadingRole(false); }
+    }).catch(() => {});
+    // Fetch fresh from Firestore in background
+    getUserProfile(user.uid).then(profile => {
+      if (profile?.role) {
+        setRole(profile.role as UserRole);
+        AsyncStorage.setItem(cacheKey, profile.role).catch(() => {});
+      }
       setLoadingRole(false);
-    }
+    }).catch(() => setLoadingRole(false));
   }, []);
 
   const visibleTabs = ALL_TABS.filter(

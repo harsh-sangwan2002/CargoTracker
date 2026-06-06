@@ -12,6 +12,7 @@ import {
   Timestamp,
 } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
+import { getCache, setCache, clearCacheByPrefix, TTL } from '../utils/cache';
 
 export interface TripFirestore {
   truck: string;
@@ -44,23 +45,41 @@ const mapDoc = (docSnap: any): TripFirestore & { id: string } => {
   };
 };
 
+// Revive Date strings from JSON cache back to Date objects
+const reviveTrip = (raw: any): TripFirestore & { id: string } => ({
+  ...raw,
+  departureTime: raw.departureTime ? new Date(raw.departureTime) : new Date(0),
+  arrivalTime: raw.arrivalTime ? new Date(raw.arrivalTime) : null,
+});
+
+const invalidateTripCache = () => clearCacheByPrefix('trips_');
+
 export const addTrip = async (trip: Omit<TripFirestore, 'createdAt'>) => {
-  await addDoc(tripsRef, {
-    ...trip,
-    createdAt: serverTimestamp(),
-  });
+  await addDoc(tripsRef, { ...trip, createdAt: serverTimestamp() });
+  await invalidateTripCache();
 };
 
 export const getTrips = async (): Promise<(TripFirestore & { id: string })[]> => {
+  const cached = await getCache<any[]>('trips_all');
+  if (cached) return cached.map(reviveTrip);
+
   const q = query(tripsRef, orderBy('createdAt', 'desc'));
   const snapshot = await getDocs(q);
-  return snapshot.docs.map(mapDoc);
+  const data = snapshot.docs.map(mapDoc);
+  setCache('trips_all', data, TTL.SHORT);
+  return data;
 };
 
 export const getTripsByUser = async (userId: string): Promise<(TripFirestore & { id: string })[]> => {
+  const key = `trips_user_${userId}`;
+  const cached = await getCache<any[]>(key);
+  if (cached) return cached.map(reviveTrip);
+
   const q = query(tripsRef, where('userId', '==', userId), orderBy('createdAt', 'desc'));
   const snapshot = await getDocs(q);
-  return snapshot.docs.map(mapDoc);
+  const data = snapshot.docs.map(mapDoc);
+  setCache(key, data, TTL.SHORT);
+  return data;
 };
 
 export const getTripsByDateRange = async (
@@ -94,19 +113,21 @@ export const getTripsByDateRange = async (
 };
 
 export const updateTrip = async (id: string, data: Partial<TripFirestore>) => {
-  const ref = doc(db, 'trips', id);
-  await updateDoc(ref, data);
+  await updateDoc(doc(db, 'trips', id), data);
+  await invalidateTripCache();
 };
 
 export const startTrip = async (id: string) => {
   await updateDoc(doc(db, 'trips', id), { departureTime: new Date(), status: 'active' });
+  await invalidateTripCache();
 };
 
 export const endTrip = async (id: string) => {
   await updateDoc(doc(db, 'trips', id), { arrivalTime: new Date(), status: 'completed' });
+  await invalidateTripCache();
 };
 
 export const deleteTrip = async (id: string) => {
-  const ref = doc(db, 'trips', id);
-  await deleteDoc(ref);
+  await deleteDoc(doc(db, 'trips', id));
+  await invalidateTripCache();
 };

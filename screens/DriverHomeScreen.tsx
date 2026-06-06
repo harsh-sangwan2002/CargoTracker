@@ -9,6 +9,7 @@ import { auth } from '../firebaseConfig';
 import { getTripsByUser, startTrip, endTrip, TripFirestore } from '../services/tripService';
 import { updateDriverLocation, clearDriverTracking } from '../services/locationService';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
+import { ShimmerStatsRow, ShimmerList } from '../components/Shimmer';
 import type { TabId } from './MainTabsScreen';
 
 interface Props {
@@ -175,11 +176,7 @@ export default function DriverHomeScreen({ onTabPress }: Props) {
           </View>
         )}
 
-        {loading && (
-          <View style={[s.statsRow, { justifyContent: 'center', paddingVertical: Spacing[6] }]}>
-            <ActivityIndicator color={Colors.primary} />
-          </View>
-        )}
+        {loading && <ShimmerStatsRow />}
 
         {/* Active Trip */}
         {activeTrip && (
@@ -244,12 +241,7 @@ export default function DriverHomeScreen({ onTabPress }: Props) {
         </View>
 
         {loading ? (
-          [0, 1].map(i => (
-            <View key={i} style={[s.pendingCard, { opacity: 0.4 }]}>
-              <View style={{ height: 16, width: '60%', backgroundColor: Colors.border, borderRadius: 6, marginBottom: 8 }} />
-              <View style={{ height: 12, width: '80%', backgroundColor: Colors.border, borderRadius: 6 }} />
-            </View>
-          ))
+          <ShimmerList count={3} />
         ) : pendingTrips.length === 0 && !activeTrip ? (
           <View style={s.emptyState}>
             <Text style={s.emptyIcon}>🚛</Text>

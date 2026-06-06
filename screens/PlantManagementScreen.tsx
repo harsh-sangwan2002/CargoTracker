@@ -16,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { getPlants, addPlant, updatePlant, deletePlant, Plant, seedDefaultPlantsIfEmpty } from '../services/plantService';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
+import { ShimmerList } from '../components/Shimmer';
 
 export default function PlantManagementScreen() {
   const navigation = useNavigation<any>();
@@ -132,9 +133,7 @@ export default function PlantManagementScreen() {
       </View>
 
       {loading ? (
-        <View style={s.loaderCenter}>
-          <ActivityIndicator size="large" color={Colors.primary} />
-        </View>
+        <ShimmerList count={6} style={{ padding: Spacing[3] }} />
       ) : (
         <FlatList
           data={filtered}

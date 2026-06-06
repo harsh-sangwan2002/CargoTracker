@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,10 @@ import {
   Platform,
   ActivityIndicator,
   RefreshControl,
+  Animated,
+  PanResponder,
+  Keyboard,
+  TouchableWithoutFeedback,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -21,6 +25,7 @@ import { getTrips, getTripsByUser, addTrip, updateTrip, deleteTrip, TripFirestor
 import { getDrivers, Driver } from '../services/driverService';
 import { getPlants, seedDefaultPlantsIfEmpty, Plant } from '../services/plantService';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
+import { ShimmerList } from '../components/Shimmer';
 import type { UserRole } from './MainTabsScreen';
 
 interface Props {
@@ -65,6 +70,7 @@ function DropdownInput({ label, value, onChangeText, suggestions, onSelect, plac
         value={value}
         onChangeText={t => { onChangeText(t); setOpen(true); }}
         onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
         autoCapitalize="words"
       />
       {open && filtered.length > 0 && (
@@ -111,6 +117,7 @@ function DriverDropdown({ label, value, onChangeText, drivers, onSelect, zIndex 
         value={value}
         onChangeText={t => { onChangeText(t); setOpen(true); }}
         onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
         autoCapitalize="words"
       />
       {open && filtered.length > 0 && (
@@ -213,11 +220,26 @@ export default function TripsScreen({ role }: Props) {
   const [editForm, setEditForm] = useState<FormState>(emptyForm());
 
   // Date pickers
-  const [showDepPicker, setShowDepPicker] = useState(false);
-  const [showArrPicker, setShowArrPicker] = useState(false);
-  const [pickerCtx, setPickerCtx] = useState<'add' | 'edit'>('add');
+  const [activePicker, setActivePicker] = useState<null | 'add-dep' | 'edit-dep' | 'edit-arr'>(null);
   const [tempDate, setTempDate] = useState(new Date());
-  const [pickerMode, setPickerMode] = useState<'departure' | 'arrival'>('departure');
+  const [pickerPhase, setPickerPhase] = useState<'date' | 'time'>('date');
+
+  // Swipe-to-close for Add modal
+  const swipeY = useRef(new Animated.Value(0)).current;
+  const addModalPan = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gs) => gs.dy > 4 && Math.abs(gs.dy) > Math.abs(gs.dx),
+      onPanResponderMove: (_, gs) => { if (gs.dy > 0) swipeY.setValue(gs.dy); },
+      onPanResponderRelease: (_, gs) => {
+        if (gs.dy > 120 || gs.vy > 0.5) {
+          Animated.timing(swipeY, { toValue: 800, duration: 200, useNativeDriver: true })
+            .start(() => { swipeY.setValue(0); setAddModal(false); Keyboard.dismiss(); });
+        } else {
+          Animated.spring(swipeY, { toValue: 0, useNativeDriver: true }).start();
+        }
+      },
+    })
+  ).current;
 
   const loadAll = async (silent = false) => {
     if (!silent) setLoading(true);
@@ -237,6 +259,17 @@ export default function TripsScreen({ role }: Props) {
       setLoading(false);
       setRefreshing(false);
     }
+  };
+
+  const refreshTrips = async () => {
+    setRefreshing(true);
+    try {
+      const data = role === 'driver'
+        ? await getTripsByUser(user?.uid ?? '')
+        : await getTrips();
+      setTrips(data);
+    } catch (e) { console.error(e); }
+    finally { setRefreshing(false); }
   };
 
   useEffect(() => { loadAll(); }, []);
@@ -289,20 +322,19 @@ export default function TripsScreen({ role }: Props) {
         companyName: companyName.trim(),
         itemType: itemType.trim(),
         quantity: quantity.trim(),
-        fuelFilled: form.fuelFilled.trim() || '0',
+        fuelFilled: '0',
         distanceTravelled: form.distanceTravelled.trim() || '0',
         fromPlant: fromPlant.trim(),
         toPlant: toPlant.trim(),
         departureTime: departureTime,
-        arrivalTime: form.arrivalTime,
-        status: form.arrivalTime ? 'Delivered' : 'Active',
+        arrivalTime: null,
+        status: 'Active',
         time: 'Just now',
         userId: user?.uid ?? '',
       });
-      Alert.alert('Success', `Trip added for ${vehicleNo.trim().toUpperCase()}`);
       setForm(emptyForm());
       setAddModal(false);
-      loadAll(true);
+      refreshTrips();
     } catch (e) {
       Alert.alert('Error', 'Failed to add trip.');
     } finally {
@@ -338,7 +370,7 @@ export default function TripsScreen({ role }: Props) {
       setIsEditing(false);
       setViewModal(false);
       setSelected(null);
-      loadAll(true);
+      refreshTrips();
     } catch (e) {
       Alert.alert('Error', 'Failed to update trip.');
     } finally {
@@ -358,7 +390,7 @@ export default function TripsScreen({ role }: Props) {
             await deleteTrip(selected.id);
             setViewModal(false);
             setSelected(null);
-            loadAll(true);
+            refreshTrips();
           } catch {
             Alert.alert('Error', 'Failed to delete trip.');
           }
@@ -382,26 +414,6 @@ export default function TripsScreen({ role }: Props) {
     if (selected) { setEditForm(tripToForm(selected)); setIsEditing(true); }
   };
 
-  const openDatePicker = (ctx: 'add' | 'edit', mode: 'departure' | 'arrival') => {
-    const current = ctx === 'add'
-      ? (mode === 'departure' ? form.departureTime : form.arrivalTime)
-      : (mode === 'departure' ? editForm.departureTime : editForm.arrivalTime);
-    setTempDate(current ?? new Date());
-    setPickerCtx(ctx);
-    setPickerMode(mode);
-    if (mode === 'departure') setShowDepPicker(true);
-    else setShowArrPicker(true);
-  };
-
-  const applyDate = (date: Date) => {
-    if (pickerCtx === 'add') {
-      if (pickerMode === 'departure') setField('departureTime', date);
-      else setField('arrivalTime', date);
-    } else {
-      if (pickerMode === 'departure') setEditField('departureTime', date);
-      else setEditField('arrivalTime', date);
-    }
-  };
 
   const allCount = trips.length;
   const activeCount = trips.filter(t => !t.arrivalTime).length;
@@ -452,10 +464,7 @@ export default function TripsScreen({ role }: Props) {
 
       {/* List */}
       {loading ? (
-        <View style={s.loaderCenter}>
-          <ActivityIndicator size="large" color={Colors.primary} />
-          <Text style={s.loadingTxt}>Loading trips...</Text>
-        </View>
+        <ShimmerList count={6} style={{ padding: Spacing[3] }} />
       ) : (
         <FlatList
           data={displayedTrips}
@@ -527,52 +536,14 @@ export default function TripsScreen({ role }: Props) {
         />
       )}
 
-      {/* ─── DATE PICKER MODALS ─── */}
-      {showDepPicker && (
-        <Modal transparent visible animationType="slide">
-          <View style={dp.overlay}>
-            <View style={dp.sheet}>
-              <DateTimePicker
-                value={tempDate}
-                mode="datetime"
-                display="spinner"
-                onChange={(_, d) => { if (d) setTempDate(d); if (Platform.OS === 'android') { if (d) applyDate(d); setShowDepPicker(false); } }}
-              />
-              {Platform.OS === 'ios' && (
-                <Pressable style={dp.done} onPress={() => { applyDate(tempDate); setShowDepPicker(false); }}>
-                  <Text style={dp.doneText}>Confirm</Text>
-                </Pressable>
-              )}
-            </View>
-          </View>
-        </Modal>
-      )}
-      {showArrPicker && (
-        <Modal transparent visible animationType="slide">
-          <View style={dp.overlay}>
-            <View style={dp.sheet}>
-              <DateTimePicker
-                value={tempDate}
-                mode="datetime"
-                display="spinner"
-                onChange={(_, d) => { if (d) setTempDate(d); if (Platform.OS === 'android') { if (d) applyDate(d); setShowArrPicker(false); } }}
-              />
-              {Platform.OS === 'ios' && (
-                <Pressable style={dp.done} onPress={() => { applyDate(tempDate); setShowArrPicker(false); }}>
-                  <Text style={dp.doneText}>Confirm</Text>
-                </Pressable>
-              )}
-            </View>
-          </View>
-        </Modal>
-      )}
-
       {/* ─── ADD TRIP MODAL ─── */}
-      <Modal visible={addModal} transparent animationType="slide" onRequestClose={() => setAddModal(false)}>
+      <Modal visible={addModal} transparent animationType="slide" onRequestClose={() => { setAddModal(false); Keyboard.dismiss(); }}>
         <KeyboardAvoidingView style={m.overlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-          <View style={m.sheet}>
-            <View style={m.handle} />
-            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <Animated.View style={[m.sheet, { transform: [{ translateY: swipeY }] }]}>
+            <View style={m.handle} {...addModalPan.panHandlers} hitSlop={{ top: 10, bottom: 20, left: 100, right: 100 }} />
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
+              <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+              <View>
               <Text style={m.title}>Add New Trip</Text>
 
               <View style={m.row}>
@@ -608,16 +579,9 @@ export default function TripsScreen({ role }: Props) {
                 </View>
               </View>
 
-              <View style={m.row}>
-                <View style={{ flex: 1 }}>
-                  <Text style={inp.label}>Quantity (tons) *</Text>
-                  <TextInput style={inp.field} value={form.quantity} onChangeText={t => setField('quantity', t)} placeholder="0" placeholderTextColor={Colors.textMuted} keyboardType="decimal-pad" />
-                </View>
-                <View style={{ width: Spacing[3] }} />
-                <View style={{ flex: 1 }}>
-                  <Text style={inp.label}>Fuel (liters)</Text>
-                  <TextInput style={inp.field} value={form.fuelFilled} onChangeText={t => setField('fuelFilled', t)} placeholder="0" placeholderTextColor={Colors.textMuted} keyboardType="decimal-pad" />
-                </View>
+              <View style={{ marginBottom: Spacing[3] }}>
+                <Text style={inp.label}>Quantity (tons) *</Text>
+                <TextInput style={inp.field} value={form.quantity} onChangeText={t => setField('quantity', t)} placeholder="0" placeholderTextColor={Colors.textMuted} keyboardType="decimal-pad" />
               </View>
 
               <View style={{ zIndex: 120, elevation: 12 }}>
@@ -643,18 +607,45 @@ export default function TripsScreen({ role }: Props) {
 
               <View style={{ zIndex: 1 }}>
                 <Text style={inp.label}>Distance (km)</Text>
-                <TextInput style={inp.field} value={form.distanceTravelled} onChangeText={t => setField('distanceTravelled', t)} placeholder="Optional" placeholderTextColor={Colors.textMuted} keyboardType="decimal-pad" />
+                <TextInput style={[inp.field, { marginBottom: Spacing[3] }]} value={form.distanceTravelled} onChangeText={t => setField('distanceTravelled', t)} placeholder="Optional" placeholderTextColor={Colors.textMuted} keyboardType="decimal-pad" />
 
-                <DateBtn label="Departure Time *" value={form.departureTime} onPress={() => openDatePicker('add', 'departure')} />
-                <DateBtn label="Arrival Time" value={form.arrivalTime} onPress={() => openDatePicker('add', 'arrival')} />
-                {form.arrivalTime && (
-                  <TouchableOpacity onPress={() => setField('arrivalTime', null)} style={m.clearBtn}>
-                    <Text style={m.clearBtnText}>✕ Clear arrival time</Text>
-                  </TouchableOpacity>
+                <DateBtn label="Departure Time *" value={form.departureTime} onPress={() => { setTempDate(form.departureTime ?? new Date()); setPickerPhase('date'); setActivePicker('add-dep'); }} />
+                {activePicker === 'add-dep' && (
+                  <>
+                    <Text style={dp.phaseLabel}>{pickerPhase === 'date' ? 'Select Date' : 'Select Time'}</Text>
+                    <DateTimePicker
+                      value={tempDate}
+                      mode={pickerPhase === 'date' ? 'date' : 'time'}
+                      display={pickerPhase === 'date' ? (Platform.OS === 'ios' ? 'spinner' : 'calendar') : (Platform.OS === 'ios' ? 'spinner' : 'clock')}
+                      onChange={(_, d) => {
+                        if (!d) return;
+                        if (pickerPhase === 'date') {
+                          const merged = new Date(tempDate);
+                          merged.setFullYear(d.getFullYear(), d.getMonth(), d.getDate());
+                          setTempDate(merged);
+                          if (Platform.OS === 'android') setPickerPhase('time');
+                        } else {
+                          const merged = new Date(tempDate);
+                          merged.setHours(d.getHours(), d.getMinutes(), 0, 0);
+                          setTempDate(merged);
+                          if (Platform.OS === 'android') { setField('departureTime', merged); setActivePicker(null); setPickerPhase('date'); }
+                        }
+                      }}
+                    />
+                    {Platform.OS === 'ios' && (
+                      pickerPhase === 'date'
+                        ? <Pressable style={dp.done} onPress={() => setPickerPhase('time')}>
+                            <Text style={dp.doneText}>Next →</Text>
+                          </Pressable>
+                        : <Pressable style={dp.done} onPress={() => { setField('departureTime', tempDate); setActivePicker(null); setPickerPhase('date'); }}>
+                            <Text style={dp.doneText}>Confirm</Text>
+                          </Pressable>
+                    )}
+                  </>
                 )}
 
                 <View style={m.btns}>
-                  <TouchableOpacity style={m.cancelBtn} onPress={() => setAddModal(false)} disabled={saving}>
+                  <TouchableOpacity style={m.cancelBtn} onPress={() => { setAddModal(false); Keyboard.dismiss(); }} disabled={saving}>
                     <Text style={m.cancelBtnText}>Cancel</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={m.saveBtn} onPress={handleAddTrip} disabled={saving} activeOpacity={0.85}>
@@ -662,17 +653,21 @@ export default function TripsScreen({ role }: Props) {
                   </TouchableOpacity>
                 </View>
               </View>
+              </View>
+              </TouchableWithoutFeedback>
             </ScrollView>
-          </View>
+          </Animated.View>
         </KeyboardAvoidingView>
       </Modal>
 
       {/* ─── VIEW / EDIT MODAL ─── */}
-      <Modal visible={viewModal} transparent animationType="slide" onRequestClose={() => { setViewModal(false); setIsEditing(false); }}>
+      <Modal visible={viewModal} transparent animationType="slide" onRequestClose={() => { setViewModal(false); setIsEditing(false); Keyboard.dismiss(); }}>
         <KeyboardAvoidingView style={m.overlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <View style={m.sheet}>
             <View style={m.handle} />
-            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
+              <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+              <View>
               <Text style={m.title}>{isEditing ? 'Edit Trip' : 'Trip Details'}</Text>
 
               {isEditing ? (
@@ -733,8 +728,74 @@ export default function TripsScreen({ role }: Props) {
                     <Text style={inp.label}>Distance (km)</Text>
                     <TextInput style={[inp.field, { marginBottom: Spacing[3] }]} value={editForm.distanceTravelled} onChangeText={t => setEditField('distanceTravelled', t)} keyboardType="decimal-pad" placeholder="Optional" placeholderTextColor={Colors.textMuted} />
 
-                    <DateBtn label="Departure Time *" value={editForm.departureTime} onPress={() => openDatePicker('edit', 'departure')} />
-                    <DateBtn label="Arrival Time" value={editForm.arrivalTime} onPress={() => openDatePicker('edit', 'arrival')} />
+                    <DateBtn label="Departure Time *" value={editForm.departureTime} onPress={() => { setTempDate(editForm.departureTime ?? new Date()); setPickerPhase('date'); setActivePicker('edit-dep'); }} />
+                    {activePicker === 'edit-dep' && (
+                      <>
+                        <Text style={dp.phaseLabel}>{pickerPhase === 'date' ? 'Select Date' : 'Select Time'}</Text>
+                        <DateTimePicker
+                          value={tempDate}
+                          mode={pickerPhase === 'date' ? 'date' : 'time'}
+                          display={pickerPhase === 'date' ? (Platform.OS === 'ios' ? 'spinner' : 'calendar') : (Platform.OS === 'ios' ? 'spinner' : 'clock')}
+                          onChange={(_, d) => {
+                            if (!d) return;
+                            if (pickerPhase === 'date') {
+                              const merged = new Date(tempDate);
+                              merged.setFullYear(d.getFullYear(), d.getMonth(), d.getDate());
+                              setTempDate(merged);
+                              if (Platform.OS === 'android') setPickerPhase('time');
+                            } else {
+                              const merged = new Date(tempDate);
+                              merged.setHours(d.getHours(), d.getMinutes(), 0, 0);
+                              setTempDate(merged);
+                              if (Platform.OS === 'android') { setEditField('departureTime', merged); setActivePicker(null); setPickerPhase('date'); }
+                            }
+                          }}
+                        />
+                        {Platform.OS === 'ios' && (
+                          pickerPhase === 'date'
+                            ? <Pressable style={dp.done} onPress={() => setPickerPhase('time')}>
+                                <Text style={dp.doneText}>Next →</Text>
+                              </Pressable>
+                            : <Pressable style={dp.done} onPress={() => { setEditField('departureTime', tempDate); setActivePicker(null); setPickerPhase('date'); }}>
+                                <Text style={dp.doneText}>Confirm</Text>
+                              </Pressable>
+                        )}
+                      </>
+                    )}
+                    <DateBtn label="Arrival Time" value={editForm.arrivalTime} onPress={() => { setTempDate(editForm.arrivalTime ?? new Date()); setPickerPhase('date'); setActivePicker('edit-arr'); }} />
+                    {activePicker === 'edit-arr' && (
+                      <>
+                        <Text style={dp.phaseLabel}>{pickerPhase === 'date' ? 'Select Date' : 'Select Time'}</Text>
+                        <DateTimePicker
+                          value={tempDate}
+                          mode={pickerPhase === 'date' ? 'date' : 'time'}
+                          display={pickerPhase === 'date' ? (Platform.OS === 'ios' ? 'spinner' : 'calendar') : (Platform.OS === 'ios' ? 'spinner' : 'clock')}
+                          onChange={(_, d) => {
+                            if (!d) return;
+                            if (pickerPhase === 'date') {
+                              const merged = new Date(tempDate);
+                              merged.setFullYear(d.getFullYear(), d.getMonth(), d.getDate());
+                              setTempDate(merged);
+                              if (Platform.OS === 'android') setPickerPhase('time');
+                            } else {
+                              const merged = new Date(tempDate);
+                              merged.setHours(d.getHours(), d.getMinutes(), 0, 0);
+                              setTempDate(merged);
+                              if (Platform.OS === 'android') { setEditField('arrivalTime', merged); setActivePicker(null); setPickerPhase('date'); }
+                            }
+                          }}
+                        />
+                        {Platform.OS === 'ios' && (
+                          pickerPhase === 'date'
+                            ? <Pressable style={dp.done} onPress={() => setPickerPhase('time')}>
+                                <Text style={dp.doneText}>Next →</Text>
+                              </Pressable>
+                            : <Pressable style={dp.done} onPress={() => { setEditField('arrivalTime', tempDate); setActivePicker(null); setPickerPhase('date'); }}>
+                                <Text style={dp.doneText}>Confirm</Text>
+                              </Pressable>
+                        )}
+                      </>
+                    )}
                     {editForm.arrivalTime && (
                       <TouchableOpacity onPress={() => setEditField('arrivalTime', null)} style={m.clearBtn}>
                         <Text style={m.clearBtnText}>✕ Clear arrival time</Text>
@@ -788,6 +849,8 @@ export default function TripsScreen({ role }: Props) {
                   </View>
                 </>
               )}
+              </View>
+              </TouchableWithoutFeedback>
             </ScrollView>
           </View>
         </KeyboardAvoidingView>
@@ -1038,4 +1101,14 @@ const dp = {
     backgroundColor: Colors.surfaceAlt,
   },
   doneText: { fontSize: FontSize.md, color: Colors.primary, fontWeight: '700' as const },
+  phaseLabel: {
+    fontSize: FontSize.xs,
+    fontWeight: '600' as const,
+    color: Colors.textMuted,
+    textAlign: 'center' as const,
+    paddingTop: Spacing[2],
+    paddingBottom: Spacing[1],
+    textTransform: 'uppercase' as const,
+    letterSpacing: 0.8,
+  },
 };

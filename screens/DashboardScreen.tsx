@@ -4,7 +4,6 @@ import {
   Text,
   ScrollView,
   TouchableOpacity,
-  Animated,
   RefreshControl,
   Switch,
   Alert,
@@ -16,32 +15,13 @@ import { getTrips, getTripsByUser, TripFirestore } from '../services/tripService
 import { getDrivers } from '../services/driverService';
 import { updateDriverLocation, clearDriverTracking } from '../services/locationService';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
+import { ShimmerBox } from '../components/Shimmer';
 import type { UserRole, TabId } from './MainTabsScreen';
 
 interface Props {
   role: UserRole;
   onTabPress: (tab: TabId) => void;
 }
-
-const SkeletonBox = ({ width, height, style }: { width: any; height: number; style?: any }) => {
-  const anim = useRef(new Animated.Value(0.4)).current;
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(anim, { toValue: 1, duration: 700, useNativeDriver: true }),
-        Animated.timing(anim, { toValue: 0.4, duration: 700, useNativeDriver: true }),
-      ])
-    ).start();
-  }, []);
-  return (
-    <Animated.View
-      style={[
-        { width, height, borderRadius: Radius.sm, backgroundColor: Colors.border, opacity: anim },
-        style,
-      ]}
-    />
-  );
-};
 
 const formatDT = (d: Date | null) => {
   if (!d) return '—';
@@ -231,8 +211,8 @@ export default function DashboardScreen({ role, onTabPress }: Props) {
           <View style={s.statsGrid}>
             {[0,1,2,3].map(i => (
               <View key={i} style={s.statCard}>
-                <SkeletonBox width={48} height={36} style={{ marginBottom: 8 }} />
-                <SkeletonBox width="70%" height={12} />
+                <ShimmerBox width={48} height={36} style={{ marginBottom: 8 }} />
+                <ShimmerBox width="70%" height={12} />
               </View>
             ))}
           </View>
@@ -259,11 +239,11 @@ export default function DashboardScreen({ role, onTabPress }: Props) {
           {loading ? (
             [0,1,2,3].map(i => (
               <View key={i} style={s.tripSkeleton}>
-                <SkeletonBox width={36} height={36} style={{ borderRadius: Radius.full, marginRight: 12 }} />
+                <ShimmerBox width={36} height={36} style={{ borderRadius: Radius.full, marginRight: 12 }} />
                 <View style={{ flex: 1, gap: 6 }}>
-                  <SkeletonBox width="60%" height={13} />
-                  <SkeletonBox width="80%" height={11} />
-                  <SkeletonBox width="50%" height={11} />
+                  <ShimmerBox width="60%" height={13} />
+                  <ShimmerBox width="80%" height={11} />
+                  <ShimmerBox width="50%" height={11} />
                 </View>
               </View>
             ))
