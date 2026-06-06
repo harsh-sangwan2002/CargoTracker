@@ -8,17 +8,19 @@ import * as Location from 'expo-location';
 import { auth } from '../firebaseConfig';
 import { getTripsByUser, startTrip, endTrip, TripFirestore } from '../services/tripService';
 import { updateDriverLocation, clearDriverTracking } from '../services/locationService';
+import { getDriverNotifications, markAllNotificationsRead, AppNotification } from '../services/notificationService';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
 import { ShimmerStatsRow, ShimmerList } from '../components/Shimmer';
 import type { TabId } from './MainTabsScreen';
 
 interface Props {
   onTabPress: (tab: TabId) => void;
+  onNavigateToTrip: (tripId: string) => void;
 }
 
 type Trip = TripFirestore & { id: string };
 
-export default function DriverHomeScreen({ onTabPress }: Props) {
+export default function DriverHomeScreen({ onTabPress, onNavigateToTrip }: Props) {
   const user = auth.currentUser;
   const [trips, setTrips] = useState<Trip[]>([]);
   const [loading, setLoading] = useState(true);
@@ -26,11 +28,24 @@ export default function DriverHomeScreen({ onTabPress }: Props) {
   const [isTracking, setIsTracking] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const locationWatcher = useRef<Location.LocationSubscription | null>(null);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [dismissingNotifs, setDismissingNotifs] = useState(false);
+
+  const loadNotifications = async () => {
+    if (!user?.uid) return;
+    const notifs = await getDriverNotifications(user.uid);
+    setNotifications(notifs);
+  };
 
   const load = async () => {
     try {
       const data = await getTripsByUser(user?.uid ?? '');
       setTrips(data);
+      // Auto-resume GPS if driver has an active trip and isn't already tracking
+      const running = data.find(t => t.status === 'active' && !t.arrivalTime);
+      if (running && !locationWatcher.current) {
+        await startGPS(running);
+      }
     } catch (e) {
       console.error(e);
     } finally {
@@ -41,11 +56,24 @@ export default function DriverHomeScreen({ onTabPress }: Props) {
 
   useEffect(() => {
     load();
+    loadNotifications();
     return () => {
       locationWatcher.current?.remove();
       if (user) clearDriverTracking(user.uid).catch(() => {});
     };
   }, []);
+
+  const unreadNotifs = notifications.filter(n => !n.read);
+
+  const handleDismissAll = async () => {
+    if (!user?.uid) return;
+    setDismissingNotifs(true);
+    try {
+      await markAllNotificationsRead(user.uid);
+      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    } catch {}
+    setDismissingNotifs(false);
+  };
 
   const startGPS = async (activeTrip?: Trip) => {
     const { status } = await Location.requestForegroundPermissionsAsync();
@@ -132,12 +160,21 @@ export default function DriverHomeScreen({ onTabPress }: Props) {
     );
   };
 
+  const HOME_LIMIT = 7;
   const now = new Date();
   const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
-  const activeTrip = trips.find(t => t.departureTime && !t.arrivalTime);
-  const pendingTrips = trips.filter(t => !t.departureTime);
+  // activeTrip = trip the driver has pressed "Start" on (status set to 'active' by startTrip())
+  const activeTrip = trips.find(t => t.status === 'active' && !t.arrivalTime);
+  // recentTrips = last 7 (already sorted desc by createdAt)
+  const recentTrips = trips.slice(0, HOME_LIMIT);
   const todayCount = trips.filter(t => t.departureTime && t.departureTime >= todayStart).length;
   const completedCount = trips.filter(t => !!t.arrivalTime).length;
+
+  const getTripStatus = (t: Trip): 'pending' | 'in-progress' | 'completed' => {
+    if (!!t.arrivalTime) return 'completed';
+    if (t.status === 'active') return 'in-progress';
+    return 'pending';
+  };
 
   const hour = now.getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
@@ -159,6 +196,24 @@ export default function DriverHomeScreen({ onTabPress }: Props) {
             <Text style={s.driverBadgeText}>DRIVER</Text>
           </View>
         </View>
+
+        {/* Notifications */}
+        {unreadNotifs.length > 0 && (
+          <View style={s.notifSection}>
+            <View style={s.notifHeader}>
+              <Text style={s.notifHeaderText}>🔔  {unreadNotifs.length} New Assignment{unreadNotifs.length > 1 ? 's' : ''}</Text>
+              <TouchableOpacity onPress={handleDismissAll} disabled={dismissingNotifs} activeOpacity={0.7}>
+                <Text style={s.notifDismissAll}>Dismiss all</Text>
+              </TouchableOpacity>
+            </View>
+            {unreadNotifs.map(n => (
+              <View key={n.id} style={s.notifCard}>
+                <Text style={s.notifTitle}>{n.title}</Text>
+                <Text style={s.notifBody}>{n.body}</Text>
+              </View>
+            ))}
+          </View>
+        )}
 
         {/* Stats Row */}
         {!loading && (
@@ -232,9 +287,9 @@ export default function DriverHomeScreen({ onTabPress }: Props) {
           </View>
         )}
 
-        {/* Pending Trips */}
+        {/* Recent Trips */}
         <View style={s.sectionHeader}>
-          <Text style={s.sectionTitle}>Assigned Trips</Text>
+          <Text style={s.sectionTitle}>Recent Trips</Text>
           <TouchableOpacity onPress={() => onTabPress('trips')} activeOpacity={0.7}>
             <Text style={s.seeAll}>See all →</Text>
           </TouchableOpacity>
@@ -242,45 +297,56 @@ export default function DriverHomeScreen({ onTabPress }: Props) {
 
         {loading ? (
           <ShimmerList count={3} />
-        ) : pendingTrips.length === 0 && !activeTrip ? (
+        ) : trips.length === 0 ? (
           <View style={s.emptyState}>
             <Text style={s.emptyIcon}>🚛</Text>
             <Text style={s.emptyTitle}>No trips assigned yet</Text>
             <Text style={s.emptySub}>Your manager will assign trips to you. Pull down to refresh.</Text>
           </View>
-        ) : pendingTrips.length === 0 ? (
-          <View style={[s.emptyState, { paddingVertical: Spacing[5] }]}>
-            <Text style={s.emptySub}>No pending trips. You're all caught up!</Text>
-          </View>
         ) : (
-          pendingTrips.map(trip => (
-            <View key={trip.id} style={s.pendingCard}>
-              <View style={s.pendingCardTop}>
-                <Text style={s.pendingRoute} numberOfLines={1}>
-                  {trip.fromPlant || '—'}  →  {trip.toPlant || '—'}
-                </Text>
-                <TouchableOpacity
-                  style={[s.startBtn, actionLoading === trip.id && { opacity: 0.6 }]}
-                  onPress={() => handleStartTrip(trip)}
-                  activeOpacity={0.85}
-                  disabled={!!actionLoading || !!activeTrip}
-                >
-                  {actionLoading === trip.id
-                    ? <ActivityIndicator color="#fff" size="small" />
-                    : <Text style={s.startBtnText}>Start</Text>
-                  }
-                </TouchableOpacity>
-              </View>
-              <View style={s.pendingMeta}>
-                <MetaItem icon="🚛" label={trip.truck} />
-                {trip.itemType ? <MetaItem icon="📦" label={trip.itemType} /> : null}
-                {trip.quantity ? <MetaItem icon="⚖️" label={trip.quantity} /> : null}
-              </View>
-              {activeTrip && (
-                <Text style={s.pendingDisabledNote}>Finish active trip before starting another</Text>
-              )}
-            </View>
-          ))
+          recentTrips.map(trip => {
+            const status = getTripStatus(trip);
+            return (
+              <TouchableOpacity key={trip.id} style={s.pendingCard} onPress={() => onNavigateToTrip(trip.id)} activeOpacity={0.85}>
+                <View style={s.pendingCardTop}>
+                  <Text style={s.pendingRoute} numberOfLines={1}>
+                    {trip.fromPlant || '—'}  →  {trip.toPlant || '—'}
+                  </Text>
+                  {status === 'pending' && (
+                    <TouchableOpacity
+                      style={[s.startBtn, (!!actionLoading || !!activeTrip) && { opacity: 0.5 }]}
+                      onPress={() => handleStartTrip(trip)}
+                      activeOpacity={0.85}
+                      disabled={!!actionLoading || !!activeTrip}
+                    >
+                      {actionLoading === trip.id
+                        ? <ActivityIndicator color="#fff" size="small" />
+                        : <Text style={s.startBtnText}>Start</Text>
+                      }
+                    </TouchableOpacity>
+                  )}
+                  {status === 'in-progress' && (
+                    <View style={[s.statusBadge, { backgroundColor: Colors.primaryLight }]}>
+                      <Text style={[s.statusBadgeText, { color: Colors.primary }]}>In Progress</Text>
+                    </View>
+                  )}
+                  {status === 'completed' && (
+                    <View style={[s.statusBadge, { backgroundColor: Colors.successLight }]}>
+                      <Text style={[s.statusBadgeText, { color: Colors.success }]}>Completed</Text>
+                    </View>
+                  )}
+                </View>
+                <View style={s.pendingMeta}>
+                  <MetaItem icon="🚛" label={trip.truck} />
+                  {trip.itemType ? <MetaItem icon="📦" label={trip.itemType} /> : null}
+                  {trip.quantity ? <MetaItem icon="⚖️" label={trip.quantity} /> : null}
+                </View>
+                {status === 'pending' && activeTrip && (
+                  <Text style={s.pendingDisabledNote}>Finish active trip before starting another</Text>
+                )}
+              </TouchableOpacity>
+            );
+          })
         )}
       </ScrollView>
     </SafeAreaView>
@@ -297,6 +363,27 @@ const MetaItem = ({ icon, label }: { icon: string; label: string }) => (
 const s = {
   safe: { flex: 1, backgroundColor: Colors.background } as const,
   scroll: { padding: Spacing[5], paddingBottom: Spacing[12] } as const,
+
+  notifSection: { marginBottom: Spacing[4] } as const,
+  notifHeader: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
+    marginBottom: Spacing[2],
+  },
+  notifHeaderText: { fontSize: FontSize.sm, fontWeight: '700' as const, color: Colors.warning },
+  notifDismissAll: { fontSize: FontSize.xs, color: Colors.primary, fontWeight: '600' as const },
+  notifCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    padding: Spacing[3],
+    marginBottom: Spacing[2],
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.warning,
+    ...Shadow.sm,
+  },
+  notifTitle: { fontSize: FontSize.sm, fontWeight: '700' as const, color: Colors.text, marginBottom: 2 },
+  notifBody: { fontSize: FontSize.xs, color: Colors.textSecondary },
 
   header: { flexDirection: 'row' as const, alignItems: 'center' as const, marginBottom: Spacing[5] },
   greeting: { fontSize: FontSize.sm, color: Colors.textMuted, fontWeight: '500' as const },
@@ -380,6 +467,12 @@ const s = {
     alignItems: 'center' as const,
   },
   startBtnText: { color: '#fff', fontWeight: '700' as const, fontSize: FontSize.sm },
+  statusBadge: {
+    paddingHorizontal: Spacing[3],
+    paddingVertical: Spacing[1],
+    borderRadius: Radius.full,
+  },
+  statusBadgeText: { fontSize: FontSize.xs, fontWeight: '700' as const },
   pendingMeta: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: Spacing[4] },
   pendingDisabledNote: { marginTop: Spacing[2], fontSize: FontSize.xs, color: Colors.warning, fontWeight: '500' as const },
 

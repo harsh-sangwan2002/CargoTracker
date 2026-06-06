@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { auth } from '../firebaseConfig';
 import { getUserProfile } from '../services/userService';
+import { getDriverByUserId, getDriverByEmail, linkDriverToUser } from '../services/driverService';
 import { Colors, FontSize, Shadow } from '../utils/theme';
 import DashboardScreen from './DashboardScreen';
 import DriverHomeScreen from './DriverHomeScreen';
@@ -32,18 +33,18 @@ const ALL_TABS: Tab[] = [
 
 export default function MainTabsScreen() {
   const [activeTab, setActiveTab] = useState<TabId>('home');
+  const [pendingTripId, setPendingTripId] = useState<string | null>(null);
   const [role, setRole] = useState<UserRole>('driver');
   const [loadingRole, setLoadingRole] = useState(true);
+  const [profileComplete, setProfileComplete] = useState(true);
   const user = auth.currentUser;
 
   useEffect(() => {
     if (!user?.uid) { setLoadingRole(false); return; }
     const cacheKey = `ct_role_${user.uid}`;
-    // Load cached role instantly (no spinner on re-open)
     AsyncStorage.getItem(cacheKey).then(cached => {
       if (cached) { setRole(cached as UserRole); setLoadingRole(false); }
     }).catch(() => {});
-    // Fetch fresh from Firestore in background
     getUserProfile(user.uid).then(profile => {
       if (profile?.role) {
         setRole(profile.role as UserRole);
@@ -52,6 +53,33 @@ export default function MainTabsScreen() {
       setLoadingRole(false);
     }).catch(() => setLoadingRole(false));
   }, []);
+
+  // Check driver profile completeness + auto-link admin-created record
+  useEffect(() => {
+    if (role !== 'driver' || !user?.uid) return;
+    const uid = user.uid;
+    const email = (user.email ?? '').trim().toLowerCase();
+    (async () => {
+      try {
+        const byUid = await getDriverByUserId(uid);
+        if (byUid) {
+          setProfileComplete(!!byUid.fullName?.trim());
+          return;
+        }
+        if (email) {
+          const byEmail = await getDriverByEmail(email);
+          if (byEmail) {
+            await linkDriverToUser(byEmail.id, uid);
+            setProfileComplete(!!byEmail.fullName?.trim());
+            return;
+          }
+        }
+        setProfileComplete(false);
+      } catch {
+        setProfileComplete(false);
+      }
+    })();
+  }, [role]);
 
   const visibleTabs = ALL_TABS.filter(
     tab => !tab.roles || tab.roles.includes(role)
@@ -69,15 +97,33 @@ export default function MainTabsScreen() {
     switch (activeTab) {
       case 'home':
         return role === 'driver'
-          ? <DriverHomeScreen onTabPress={setActiveTab} />
+          ? <DriverHomeScreen
+              onTabPress={setActiveTab}
+              onNavigateToTrip={(tripId) => { setPendingTripId(tripId); setActiveTab('trips'); }}
+            />
           : <DashboardScreen role={role} onTabPress={setActiveTab} />;
-      case 'trips': return <TripsScreen role={role} />;
+      case 'trips': return (
+        <TripsScreen
+          role={role}
+          pendingTripId={pendingTripId}
+          onPendingTripConsumed={() => setPendingTripId(null)}
+        />
+      );
       case 'analytics': return <AnalyticsScreen role={role} />;
       case 'manage': return <ManageHubScreen role={role} />;
-      case 'profile': return <ProfileScreen role={role} />;
+      case 'profile': return (
+        <ProfileScreen
+          role={role}
+          profileComplete={profileComplete}
+          onProfileSaved={() => setProfileComplete(true)}
+        />
+      );
       default:
         return role === 'driver'
-          ? <DriverHomeScreen onTabPress={setActiveTab} />
+          ? <DriverHomeScreen
+              onTabPress={setActiveTab}
+              onNavigateToTrip={(tripId) => { setPendingTripId(tripId); setActiveTab('trips'); }}
+            />
           : <DashboardScreen role={role} onTabPress={setActiveTab} />;
     }
   };
@@ -88,6 +134,7 @@ export default function MainTabsScreen() {
       <View style={tabBar.container}>
         {visibleTabs.map(tab => {
           const active = activeTab === tab.id;
+          const showBadge = role === 'driver' && !profileComplete && tab.id === 'profile';
           return (
             <TouchableOpacity
               key={tab.id}
@@ -95,7 +142,10 @@ export default function MainTabsScreen() {
               onPress={() => setActiveTab(tab.id)}
               activeOpacity={0.7}
             >
-              <Text style={[tabBar.icon, active && tabBar.iconActive]}>{tab.icon}</Text>
+              <View style={{ position: 'relative' }}>
+                <Text style={[tabBar.icon, active && tabBar.iconActive]}>{tab.icon}</Text>
+                {showBadge && <View style={tabBar.incompleteBadge} />}
+              </View>
               <Text style={[tabBar.label, active && tabBar.labelActive]}>{tab.label}</Text>
               {active && <View style={tabBar.dot} />}
             </TouchableOpacity>
@@ -146,5 +196,16 @@ const tabBar = {
     backgroundColor: Colors.primary,
     position: 'absolute' as const,
     bottom: -2,
+  },
+  incompleteBadge: {
+    position: 'absolute' as const,
+    top: -2,
+    right: -4,
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    backgroundColor: Colors.danger,
+    borderWidth: 1.5,
+    borderColor: Colors.surface,
   },
 };

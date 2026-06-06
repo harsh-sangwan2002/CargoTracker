@@ -23,6 +23,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { auth } from '../firebaseConfig';
 import { getTrips, getTripsByUser, addTrip, updateTrip, deleteTrip, TripFirestore } from '../services/tripService';
 import { getDrivers, Driver } from '../services/driverService';
+import { addNotification } from '../services/notificationService';
 import { getPlants, seedDefaultPlantsIfEmpty, Plant } from '../services/plantService';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
 import { ShimmerList } from '../components/Shimmer';
@@ -30,6 +31,8 @@ import type { UserRole } from './MainTabsScreen';
 
 interface Props {
   role: UserRole;
+  pendingTripId?: string | null;
+  onPendingTripConsumed?: () => void;
 }
 
 const PAGE_SIZE = 20;
@@ -98,7 +101,7 @@ interface DriverDropProps {
   value: string;
   onChangeText: (t: string) => void;
   drivers: (Driver & { id: string })[];
-  onSelect: (name: string) => void;
+  onSelect: (name: string, userId: string) => void;
   zIndex?: number;
 }
 function DriverDropdown({ label, value, onChangeText, drivers, onSelect, zIndex = 50 }: DriverDropProps) {
@@ -127,7 +130,7 @@ function DriverDropdown({ label, value, onChangeText, drivers, onSelect, zIndex 
               <TouchableOpacity
                 key={d.id}
                 style={[inp.item, i === filtered.length - 1 && { borderBottomWidth: 0 }]}
-                onPress={() => { onSelect(d.fullName); onChangeText(d.fullName); setOpen(false); }}
+                onPress={() => { onSelect(d.fullName, d.userId); onChangeText(d.fullName); setOpen(false); }}
               >
                 <Text style={inp.itemText}>{d.fullName}</Text>
                 {d.vehicleOwned ? <Text style={inp.itemSub}>{d.vehicleOwned}</Text> : null}
@@ -162,6 +165,7 @@ interface FormState {
   vehicleNo: string;
   lrNo: string;
   driverName: string;
+  driverUserId: string;
   companyName: string;
   itemType: string;
   quantity: string;
@@ -174,7 +178,7 @@ interface FormState {
 }
 
 const emptyForm = (): FormState => ({
-  vehicleNo: '', lrNo: '', driverName: '', companyName: '',
+  vehicleNo: '', lrNo: '', driverName: '', driverUserId: '', companyName: '',
   itemType: '', quantity: '', fuelFilled: '', distanceTravelled: '',
   fromPlant: '', toPlant: '', departureTime: null, arrivalTime: null,
 });
@@ -183,6 +187,7 @@ const tripToForm = (t: TripFirestore & { id: string }): FormState => ({
   vehicleNo: t.truck,
   lrNo: t.bidNo,
   driverName: t.driverName,
+  driverUserId: t.driverUserId ?? '',
   companyName: t.companyName,
   itemType: t.itemType,
   quantity: t.quantity,
@@ -195,7 +200,7 @@ const tripToForm = (t: TripFirestore & { id: string }): FormState => ({
 });
 
 /* ─── Main Screen ────────────────────────────────────────────────── */
-export default function TripsScreen({ role }: Props) {
+export default function TripsScreen({ role, pendingTripId, onPendingTripConsumed }: Props) {
   const user = auth.currentUser;
   const [trips, setTrips] = useState<(TripFirestore & { id: string })[]>([]);
   const [displayCount, setDisplayCount] = useState(PAGE_SIZE);
@@ -226,6 +231,23 @@ export default function TripsScreen({ role }: Props) {
 
   // Swipe-to-close for Add modal
   const swipeY = useRef(new Animated.Value(0)).current;
+
+  // Swipe-to-close for View/Edit modal
+  const viewSwipeY = useRef(new Animated.Value(0)).current;
+  const viewModalPan = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gs) => gs.dy > 4 && Math.abs(gs.dy) > Math.abs(gs.dx),
+      onPanResponderMove: (_, gs) => { if (gs.dy > 0) viewSwipeY.setValue(gs.dy); },
+      onPanResponderRelease: (_, gs) => {
+        if (gs.dy > 120 || gs.vy > 0.5) {
+          Animated.timing(viewSwipeY, { toValue: 800, duration: 200, useNativeDriver: true })
+            .start(() => { viewSwipeY.setValue(0); setViewModal(false); setIsEditing(false); Keyboard.dismiss(); });
+        } else {
+          Animated.spring(viewSwipeY, { toValue: 0, useNativeDriver: true }).start();
+        }
+      },
+    })
+  ).current;
   const addModalPan = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, gs) => gs.dy > 4 && Math.abs(gs.dy) > Math.abs(gs.dx),
@@ -274,6 +296,16 @@ export default function TripsScreen({ role }: Props) {
 
   useEffect(() => { loadAll(); }, []);
 
+  // Auto-open detail modal when navigated from Home screen
+  useEffect(() => {
+    if (!pendingTripId || loading) return;
+    const trip = trips.find(t => t.id === pendingTripId);
+    if (trip) {
+      openView(trip);
+      onPendingTripConsumed?.();
+    }
+  }, [pendingTripId, loading, trips]);
+
   // Reset display count when search or filter changes
   useEffect(() => { setDisplayCount(PAGE_SIZE); }, [searchQ, statusFilter]);
 
@@ -315,6 +347,7 @@ export default function TripsScreen({ role }: Props) {
     }
     setSaving(true);
     try {
+      const driverUid = form.driverUserId;
       await addTrip({
         truck: vehicleNo.trim().toUpperCase(),
         bidNo: lrNo.trim(),
@@ -331,7 +364,15 @@ export default function TripsScreen({ role }: Props) {
         status: 'Active',
         time: 'Just now',
         userId: user?.uid ?? '',
+        driverUserId: driverUid,
       });
+      if (driverUid) {
+        addNotification({
+          driverUserId: driverUid,
+          title: 'New Trip Assigned',
+          body: `${fromPlant.trim()} → ${toPlant.trim()} · ${vehicleNo.trim().toUpperCase()}`,
+        }).catch(() => {});
+      }
       setForm(emptyForm());
       setAddModal(false);
       refreshTrips();
@@ -366,6 +407,7 @@ export default function TripsScreen({ role }: Props) {
         departureTime: f.departureTime!,
         arrivalTime: f.arrivalTime,
         status: f.arrivalTime ? 'Delivered' : 'Active',
+        driverUserId: f.driverUserId,
       });
       setIsEditing(false);
       setViewModal(false);
@@ -425,9 +467,11 @@ export default function TripsScreen({ role }: Props) {
       {/* Header */}
       <View style={s.topBar}>
         <Text style={s.pageTitle}>Trips</Text>
-        <TouchableOpacity style={s.addBtn} onPress={openAdd} activeOpacity={0.85}>
-          <Text style={s.addBtnText}>+ Add Trip</Text>
-        </TouchableOpacity>
+        {role !== 'driver' && (
+          <TouchableOpacity style={s.addBtn} onPress={openAdd} activeOpacity={0.85}>
+            <Text style={s.addBtnText}>+ Add Trip</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Search */}
@@ -563,7 +607,7 @@ export default function TripsScreen({ role }: Props) {
                 value={form.driverName}
                 onChangeText={t => setField('driverName', t)}
                 drivers={drivers}
-                onSelect={name => setField('driverName', name)}
+                onSelect={(name, uid) => { setField('driverName', name); setField('driverUserId', uid); }}
                 zIndex={200}
               />
 
@@ -663,8 +707,8 @@ export default function TripsScreen({ role }: Props) {
       {/* ─── VIEW / EDIT MODAL ─── */}
       <Modal visible={viewModal} transparent animationType="slide" onRequestClose={() => { setViewModal(false); setIsEditing(false); Keyboard.dismiss(); }}>
         <KeyboardAvoidingView style={m.overlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-          <View style={m.sheet}>
-            <View style={m.handle} />
+          <Animated.View style={[m.sheet, { transform: [{ translateY: viewSwipeY }] }]}>
+            <View style={m.handle} {...viewModalPan.panHandlers} hitSlop={{ top: 10, bottom: 20, left: 100, right: 100 }} />
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
               <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
               <View>
@@ -689,7 +733,7 @@ export default function TripsScreen({ role }: Props) {
                     value={editForm.driverName}
                     onChangeText={t => setEditField('driverName', t)}
                     drivers={drivers}
-                    onSelect={name => setEditField('driverName', name)}
+                    onSelect={(name, uid) => { setEditField('driverName', name); setEditField('driverUserId', uid); }}
                     zIndex={200}
                   />
 
@@ -840,19 +884,23 @@ export default function TripsScreen({ role }: Props) {
                     <TouchableOpacity style={m.cancelBtn} onPress={() => { setViewModal(false); setSelected(null); }}>
                       <Text style={m.cancelBtnText}>Close</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={[m.saveBtn, { backgroundColor: Colors.primary }]} onPress={openEdit} activeOpacity={0.85}>
-                      <Text style={m.saveBtnText}>Edit</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[m.saveBtn, { backgroundColor: Colors.danger }]} onPress={handleDelete} activeOpacity={0.85}>
-                      <Text style={m.saveBtnText}>Delete</Text>
-                    </TouchableOpacity>
+                    {role !== 'driver' && (
+                      <>
+                        <TouchableOpacity style={[m.saveBtn, { backgroundColor: Colors.primary }]} onPress={openEdit} activeOpacity={0.85}>
+                          <Text style={m.saveBtnText}>Edit</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={[m.saveBtn, { backgroundColor: Colors.danger }]} onPress={handleDelete} activeOpacity={0.85}>
+                          <Text style={m.saveBtnText}>Delete</Text>
+                        </TouchableOpacity>
+                      </>
+                    )}
                   </View>
                 </>
               )}
               </View>
               </TouchableWithoutFeedback>
             </ScrollView>
-          </View>
+          </Animated.View>
         </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>

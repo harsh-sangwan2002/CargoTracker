@@ -6,6 +6,8 @@ import {
   deleteDoc,
   doc,
   serverTimestamp,
+  query,
+  where,
 } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { getCache, setCache, clearCache, TTL } from '../utils/cache';
@@ -19,6 +21,7 @@ export interface Driver {
   vehicleOwned: string;
   photoUrl: string;
   userId: string;
+  email?: string;
   createdAt?: any;
   updatedAt?: any;
 }
@@ -53,6 +56,7 @@ export const getDrivers = async (userId?: string): Promise<(Driver & { id: strin
           vehicleOwned: data.vehicleOwned || '',
           photoUrl: data.photoUrl || '',
           userId: data.userId || '',
+          email: data.email || '',
           createdAt: data.createdAt,
           updatedAt: data.updatedAt,
         } as Driver & { id: string };
@@ -79,5 +83,41 @@ export const updateDriver = async (driverId: string, data: Partial<Driver>) => {
 
 export const deleteDriver = async (driverId: string) => {
   await deleteDoc(doc(db, 'drivers', driverId));
+  clearCache(CACHE_KEY);
+};
+
+const mapDriverDoc = (d: any): Driver & { id: string } => {
+  const data = d.data();
+  return {
+    id: d.id,
+    fullName: data.fullName || '',
+    age: data.age || 0,
+    address: data.address || '',
+    aadhaarCard: data.aadhaarCard || '',
+    panCard: data.panCard || '',
+    vehicleOwned: data.vehicleOwned || '',
+    photoUrl: data.photoUrl || '',
+    userId: data.userId || '',
+    email: data.email || '',
+    createdAt: data.createdAt,
+    updatedAt: data.updatedAt,
+  };
+};
+
+export const getDriverByUserId = async (uid: string): Promise<(Driver & { id: string }) | null> => {
+  const snap = await getDocs(query(driversRef, where('userId', '==', uid)));
+  if (snap.empty) return null;
+  return mapDriverDoc(snap.docs[0]);
+};
+
+export const getDriverByEmail = async (email: string): Promise<(Driver & { id: string }) | null> => {
+  const normalized = email.trim().toLowerCase();
+  const snap = await getDocs(query(driversRef, where('email', '==', normalized)));
+  if (snap.empty) return null;
+  return mapDriverDoc(snap.docs[0]);
+};
+
+export const linkDriverToUser = async (driverId: string, uid: string) => {
+  await updateDoc(doc(db, 'drivers', driverId), { userId: uid, updatedAt: serverTimestamp() });
   clearCache(CACHE_KEY);
 };

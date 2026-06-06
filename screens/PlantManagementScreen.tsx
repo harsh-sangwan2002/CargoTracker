@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,8 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Animated,
+  PanResponder,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -29,6 +31,34 @@ export default function PlantManagementScreen() {
   const [plantName, setPlantName] = useState('');
   const [plantLocation, setPlantLocation] = useState('');
   const [saving, setSaving] = useState(false);
+
+  const addSwipeY = useRef(new Animated.Value(0)).current;
+  const addModalPan = useRef(PanResponder.create({
+    onMoveShouldSetPanResponder: (_, gs) => gs.dy > 4 && Math.abs(gs.dy) > Math.abs(gs.dx),
+    onPanResponderMove: (_, gs) => { if (gs.dy > 0) addSwipeY.setValue(gs.dy); },
+    onPanResponderRelease: (_, gs) => {
+      if (gs.dy > 120 || gs.vy > 0.5) {
+        Animated.timing(addSwipeY, { toValue: 800, duration: 200, useNativeDriver: true })
+          .start(() => { addSwipeY.setValue(0); setAddModal(false); });
+      } else {
+        Animated.spring(addSwipeY, { toValue: 0, useNativeDriver: true }).start();
+      }
+    },
+  })).current;
+
+  const editSwipeY = useRef(new Animated.Value(0)).current;
+  const editModalPan = useRef(PanResponder.create({
+    onMoveShouldSetPanResponder: (_, gs) => gs.dy > 4 && Math.abs(gs.dy) > Math.abs(gs.dx),
+    onPanResponderMove: (_, gs) => { if (gs.dy > 0) editSwipeY.setValue(gs.dy); },
+    onPanResponderRelease: (_, gs) => {
+      if (gs.dy > 120 || gs.vy > 0.5) {
+        Animated.timing(editSwipeY, { toValue: 800, duration: 200, useNativeDriver: true })
+          .start(() => { editSwipeY.setValue(0); setEditModal(false); });
+      } else {
+        Animated.spring(editSwipeY, { toValue: 0, useNativeDriver: true }).start();
+      }
+    },
+  })).current;
 
   const load = async () => {
     setLoading(true);
@@ -172,8 +202,8 @@ export default function PlantManagementScreen() {
       {/* Add Modal */}
       <Modal visible={addModal} transparent animationType="slide" onRequestClose={() => setAddModal(false)}>
         <KeyboardAvoidingView style={m.overlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-          <View style={m.sheet}>
-            <View style={m.handle} />
+          <Animated.View style={[m.sheet, { transform: [{ translateY: addSwipeY }] }]}>
+            <View style={m.handle} {...addModalPan.panHandlers} hitSlop={{ top: 10, bottom: 20, left: 100, right: 100 }} />
             <Text style={m.title}>Add Plant</Text>
 
             <Text style={m.label}>Plant Name *</Text>
@@ -204,15 +234,15 @@ export default function PlantManagementScreen() {
                 {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={m.saveText}>Add Plant</Text>}
               </TouchableOpacity>
             </View>
-          </View>
+          </Animated.View>
         </KeyboardAvoidingView>
       </Modal>
 
       {/* Edit Modal */}
       <Modal visible={editModal} transparent animationType="slide" onRequestClose={() => setEditModal(false)}>
         <KeyboardAvoidingView style={m.overlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-          <View style={m.sheet}>
-            <View style={m.handle} />
+          <Animated.View style={[m.sheet, { transform: [{ translateY: editSwipeY }] }]}>
+            <View style={m.handle} {...editModalPan.panHandlers} hitSlop={{ top: 10, bottom: 20, left: 100, right: 100 }} />
             <Text style={m.title}>Edit Plant</Text>
 
             <Text style={m.label}>Plant Name *</Text>
@@ -241,7 +271,7 @@ export default function PlantManagementScreen() {
                 {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={m.saveText}>Save Changes</Text>}
               </TouchableOpacity>
             </View>
-          </View>
+          </Animated.View>
         </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>

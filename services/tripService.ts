@@ -30,6 +30,7 @@ export interface TripFirestore {
   status: string;
   time: string;
   userId?: string;
+  driverUserId?: string;
   createdAt: any;
 }
 
@@ -70,14 +71,16 @@ export const getTrips = async (): Promise<(TripFirestore & { id: string })[]> =>
   return data;
 };
 
-export const getTripsByUser = async (userId: string): Promise<(TripFirestore & { id: string })[]> => {
-  const key = `trips_user_${userId}`;
+export const getTripsByUser = async (driverUid: string): Promise<(TripFirestore & { id: string })[]> => {
+  const key = `trips_user_${driverUid}`;
   const cached = await getCache<any[]>(key);
   if (cached) return cached.map(reviveTrip);
 
-  const q = query(tripsRef, where('userId', '==', userId), orderBy('createdAt', 'desc'));
-  const snapshot = await getDocs(q);
-  const data = snapshot.docs.map(mapDoc);
+  // Query by driverUserId (trips assigned by admin/manager to this driver)
+  const snap = await getDocs(query(tripsRef, where('driverUserId', '==', driverUid)));
+  const data = snap.docs
+    .map(mapDoc)
+    .sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
   setCache(key, data, TTL.SHORT);
   return data;
 };

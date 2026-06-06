@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,8 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  Animated,
+  PanResponder,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { collection, getDocs, doc, updateDoc, query, where } from 'firebase/firestore';
@@ -48,6 +50,20 @@ export default function UserManagementScreen() {
   const [newEmail, setNewEmail] = useState('');
   const [newRole, setNewRole] = useState<UserRecord['role']>('driver');
   const [saving, setSaving] = useState(false);
+
+  const addSwipeY = useRef(new Animated.Value(0)).current;
+  const addModalPan = useRef(PanResponder.create({
+    onMoveShouldSetPanResponder: (_, gs) => gs.dy > 4 && Math.abs(gs.dy) > Math.abs(gs.dx),
+    onPanResponderMove: (_, gs) => { if (gs.dy > 0) addSwipeY.setValue(gs.dy); },
+    onPanResponderRelease: (_, gs) => {
+      if (gs.dy > 120 || gs.vy > 0.5) {
+        Animated.timing(addSwipeY, { toValue: 800, duration: 200, useNativeDriver: true })
+          .start(() => { addSwipeY.setValue(0); setAddModal(false); });
+      } else {
+        Animated.spring(addSwipeY, { toValue: 0, useNativeDriver: true }).start();
+      }
+    },
+  })).current;
 
   useEffect(() => { init(); }, []);
 
@@ -258,8 +274,8 @@ export default function UserManagementScreen() {
       {/* Assign Role to existing user Modal */}
       <Modal visible={addModal} transparent animationType="slide" onRequestClose={() => setAddModal(false)}>
         <KeyboardAvoidingView style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-          <View style={mo.sheet}>
-            <View style={mo.handle} />
+          <Animated.View style={[mo.sheet, { transform: [{ translateY: addSwipeY }] }]}>
+            <View style={mo.handle} {...addModalPan.panHandlers} hitSlop={{ top: 10, bottom: 20, left: 100, right: 100 }} />
             <Text style={mo.title}>Assign Role</Text>
             <Text style={mo.sub}>The user must have already registered an account.</Text>
 
@@ -300,7 +316,7 @@ export default function UserManagementScreen() {
                 {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={mo.confirmText}>Assign Role</Text>}
               </TouchableOpacity>
             </View>
-          </View>
+          </Animated.View>
         </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>

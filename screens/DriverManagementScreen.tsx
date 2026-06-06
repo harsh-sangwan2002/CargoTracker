@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,8 @@ import {
   Image,
   ActivityIndicator,
   ScrollView,
+  Animated,
+  PanResponder,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -22,6 +24,92 @@ import { getDrivers, addDriver, updateDriver, deleteDriver, Driver } from '../se
 import { convertImageToBase64 } from '../services/userService';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
 import { ShimmerRow } from '../components/Shimmer';
+
+type DriverFormValues = {
+  fullName: string;
+  age: string;
+  address: string;
+  aadhaarCard: string;
+  panCard: string;
+  vehicleOwned: string;
+  photoUrl: string;
+  email: string;
+};
+
+const emptyForm: DriverFormValues = { fullName: '', age: '', address: '', aadhaarCard: '', panCard: '', vehicleOwned: '', photoUrl: '', email: '' };
+
+interface DriverFormProps {
+  f: DriverFormValues;
+  setF: (k: string, v: string) => void;
+  onSave: () => void;
+  onCancel: () => void;
+  submitLabel: string;
+  saving: boolean;
+  onPickImage: (isEdit: boolean) => void;
+}
+
+function DriverForm({ f, setF, onSave, onCancel, submitLabel, saving, onPickImage }: DriverFormProps) {
+  return (
+    <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+      <TouchableOpacity style={fms.photoBtn} onPress={() => onPickImage(submitLabel === 'Save Changes')} activeOpacity={0.8}>
+        {f.photoUrl ? (
+          <Image source={{ uri: f.photoUrl }} style={fms.photoImg} />
+        ) : (
+          <View style={fms.photoPlaceholder}>
+            <Text style={fms.photoPlaceholderIcon}>📷</Text>
+            <Text style={fms.photoPlaceholderText}>Add Photo</Text>
+          </View>
+        )}
+      </TouchableOpacity>
+
+      {[
+        { key: 'fullName', label: 'Full Name *', autoCapitalize: 'words' as const, placeholder: 'Driver full name' },
+        { key: 'age', label: 'Age * (18–80)', keyboardType: 'numeric' as const, placeholder: '25' },
+        { key: 'email', label: 'Email (for account linking)', keyboardType: 'email-address' as const, autoCapitalize: 'none' as const, placeholder: 'driver@example.com' },
+        { key: 'vehicleOwned', label: 'Vehicle *', autoCapitalize: 'characters' as const, placeholder: 'HR26AB1234' },
+        { key: 'aadhaarCard', label: 'Aadhaar * (12 digits)', keyboardType: 'numeric' as const, maxLength: 12, placeholder: '123456789012' },
+        { key: 'panCard', label: 'PAN Card *', autoCapitalize: 'characters' as const, maxLength: 10, placeholder: 'ABCDE1234F' },
+      ].map(field => (
+        <View key={field.key} style={{ marginBottom: Spacing[3] }}>
+          <Text style={fms.label}>{field.label}</Text>
+          <TextInput
+            style={fms.input}
+            value={(f as any)[field.key]}
+            onChangeText={v => setF(field.key, v)}
+            autoCapitalize={field.autoCapitalize ?? 'sentences'}
+            keyboardType={field.keyboardType ?? 'default'}
+            maxLength={field.maxLength}
+            placeholder={field.placeholder}
+            placeholderTextColor={Colors.textMuted}
+          />
+        </View>
+      ))}
+
+      <View style={{ marginBottom: Spacing[3] }}>
+        <Text style={fms.label}>Address *</Text>
+        <TextInput
+          style={[fms.input, { height: 80, textAlignVertical: 'top' }]}
+          value={f.address}
+          onChangeText={v => setF('address', v)}
+          multiline
+          numberOfLines={3}
+          placeholder="Full address"
+          placeholderTextColor={Colors.textMuted}
+          autoCapitalize="sentences"
+        />
+      </View>
+
+      <View style={fms.btns}>
+        <TouchableOpacity style={fms.cancelBtn} onPress={onCancel} disabled={saving}>
+          <Text style={fms.cancelText}>Cancel</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={fms.saveBtn} onPress={onSave} disabled={saving} activeOpacity={0.85}>
+          {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={fms.saveText}>{submitLabel}</Text>}
+        </TouchableOpacity>
+      </View>
+    </ScrollView>
+  );
+}
 
 export default function DriverManagementScreen() {
   const navigation = useNavigation<any>();
@@ -34,10 +122,36 @@ export default function DriverManagementScreen() {
   const [selected, setSelected] = useState<(Driver & { id: string }) | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
-
-  const emptyForm = { fullName: '', age: '', address: '', aadhaarCard: '', panCard: '', vehicleOwned: '', photoUrl: '' };
   const [form, setForm] = useState(emptyForm);
   const [editForm, setEditForm] = useState(emptyForm);
+
+  const addSwipeY = useRef(new Animated.Value(0)).current;
+  const addModalPan = useRef(PanResponder.create({
+    onMoveShouldSetPanResponder: (_, gs) => gs.dy > 4 && Math.abs(gs.dy) > Math.abs(gs.dx),
+    onPanResponderMove: (_, gs) => { if (gs.dy > 0) addSwipeY.setValue(gs.dy); },
+    onPanResponderRelease: (_, gs) => {
+      if (gs.dy > 120 || gs.vy > 0.5) {
+        Animated.timing(addSwipeY, { toValue: 800, duration: 200, useNativeDriver: true })
+          .start(() => { addSwipeY.setValue(0); setAddModal(false); });
+      } else {
+        Animated.spring(addSwipeY, { toValue: 0, useNativeDriver: true }).start();
+      }
+    },
+  })).current;
+
+  const viewSwipeY = useRef(new Animated.Value(0)).current;
+  const viewModalPan = useRef(PanResponder.create({
+    onMoveShouldSetPanResponder: (_, gs) => gs.dy > 4 && Math.abs(gs.dy) > Math.abs(gs.dx),
+    onPanResponderMove: (_, gs) => { if (gs.dy > 0) viewSwipeY.setValue(gs.dy); },
+    onPanResponderRelease: (_, gs) => {
+      if (gs.dy > 120 || gs.vy > 0.5) {
+        Animated.timing(viewSwipeY, { toValue: 800, duration: 200, useNativeDriver: true })
+          .start(() => { viewSwipeY.setValue(0); setViewModal(false); setIsEditing(false); });
+      } else {
+        Animated.spring(viewSwipeY, { toValue: 0, useNativeDriver: true }).start();
+      }
+    },
+  })).current;
 
   const load = async () => {
     setLoading(true);
@@ -94,6 +208,7 @@ export default function DriverManagementScreen() {
     if (!/^\d+$/.test(f.age) || parseInt(f.age) < 18 || parseInt(f.age) > 80) return 'Age must be between 18 and 80.';
     if (!/^\d{12}$/.test(f.aadhaarCard.replace(/\s/g, ''))) return 'Aadhaar must be exactly 12 digits.';
     if (!/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(f.panCard.toUpperCase())) return 'Invalid PAN card format (e.g. ABCDE1234F).';
+    if (f.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email.trim())) return 'Invalid email address.';
     return null;
   };
 
@@ -110,7 +225,8 @@ export default function DriverManagementScreen() {
         panCard: form.panCard.trim().toUpperCase(),
         vehicleOwned: form.vehicleOwned.trim().toUpperCase(),
         photoUrl: form.photoUrl,
-        userId: user?.uid ?? '',
+        email: form.email.trim().toLowerCase(),
+        userId: '',
       });
       Alert.alert('Success', 'Driver added successfully.');
       setAddModal(false);
@@ -137,6 +253,7 @@ export default function DriverManagementScreen() {
         panCard: editForm.panCard.trim().toUpperCase(),
         vehicleOwned: editForm.vehicleOwned.trim().toUpperCase(),
         photoUrl: editForm.photoUrl || selected.photoUrl,
+        email: editForm.email.trim().toLowerCase(),
       });
       setIsEditing(false);
       setViewModal(false);
@@ -169,73 +286,6 @@ export default function DriverManagementScreen() {
       },
     ]);
   };
-
-  const DriverForm = ({ f, setF, onSave, onCancel, submitLabel }: {
-    f: typeof emptyForm;
-    setF: (k: string, v: string) => void;
-    onSave: () => void;
-    onCancel: () => void;
-    submitLabel: string;
-  }) => (
-    <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-      {/* Photo */}
-      <TouchableOpacity style={fms.photoBtn} onPress={() => pickImage(submitLabel === 'Save Changes')} activeOpacity={0.8}>
-        {f.photoUrl ? (
-          <Image source={{ uri: f.photoUrl }} style={fms.photoImg} />
-        ) : (
-          <View style={fms.photoPlaceholder}>
-            <Text style={fms.photoPlaceholderIcon}>📷</Text>
-            <Text style={fms.photoPlaceholderText}>Add Photo</Text>
-          </View>
-        )}
-      </TouchableOpacity>
-
-      {[
-        { key: 'fullName', label: 'Full Name *', autoCapitalize: 'words' as const, placeholder: 'Driver full name' },
-        { key: 'age', label: 'Age * (18–80)', keyboardType: 'numeric' as const, placeholder: '25' },
-        { key: 'vehicleOwned', label: 'Vehicle *', autoCapitalize: 'characters' as const, placeholder: 'HR26AB1234' },
-        { key: 'aadhaarCard', label: 'Aadhaar * (12 digits)', keyboardType: 'numeric' as const, maxLength: 12, placeholder: '123456789012' },
-        { key: 'panCard', label: 'PAN Card *', autoCapitalize: 'characters' as const, maxLength: 10, placeholder: 'ABCDE1234F' },
-      ].map(field => (
-        <View key={field.key} style={{ marginBottom: Spacing[3] }}>
-          <Text style={fms.label}>{field.label}</Text>
-          <TextInput
-            style={fms.input}
-            value={(f as any)[field.key]}
-            onChangeText={v => setF(field.key, v)}
-            autoCapitalize={field.autoCapitalize ?? 'sentences'}
-            keyboardType={field.keyboardType ?? 'default'}
-            maxLength={field.maxLength}
-            placeholder={field.placeholder}
-            placeholderTextColor={Colors.textMuted}
-          />
-        </View>
-      ))}
-
-      <View style={{ marginBottom: Spacing[3] }}>
-        <Text style={fms.label}>Address *</Text>
-        <TextInput
-          style={[fms.input, { height: 80, textAlignVertical: 'top' }]}
-          value={f.address}
-          onChangeText={v => setF('address', v)}
-          multiline
-          numberOfLines={3}
-          placeholder="Full address"
-          placeholderTextColor={Colors.textMuted}
-          autoCapitalize="sentences"
-        />
-      </View>
-
-      <View style={fms.btns}>
-        <TouchableOpacity style={fms.cancelBtn} onPress={onCancel} disabled={saving}>
-          <Text style={fms.cancelText}>Cancel</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={fms.saveBtn} onPress={onSave} disabled={saving} activeOpacity={0.85}>
-          {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={fms.saveText}>{submitLabel}</Text>}
-        </TouchableOpacity>
-      </View>
-    </ScrollView>
-  );
 
   return (
     <SafeAreaView style={s.safe}>
@@ -292,9 +342,16 @@ export default function DriverManagementScreen() {
                 </View>
               )}
               <View style={s.cardInfo}>
-                <Text style={s.cardName}>{item.fullName}</Text>
+                <View style={{ flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6 }}>
+                  <Text style={s.cardName}>{item.fullName}</Text>
+                  <View style={[s.statusPill, { backgroundColor: item.userId ? '#d1fae5' : '#fef3c7' }]}>
+                    <Text style={[s.statusPillText, { color: item.userId ? '#065f46' : '#92400e' }]}>
+                      {item.userId ? 'Linked' : 'Pending'}
+                    </Text>
+                  </View>
+                </View>
                 <Text style={s.cardMeta}>Age {item.age} · {item.vehicleOwned || 'No vehicle'}</Text>
-                <Text style={s.cardAddr} numberOfLines={1}>{item.address}</Text>
+                <Text style={s.cardAddr} numberOfLines={1}>{(item as any).email || item.address}</Text>
               </View>
               <Text style={s.chevron}>›</Text>
             </TouchableOpacity>
@@ -305,8 +362,8 @@ export default function DriverManagementScreen() {
       {/* Add Modal */}
       <Modal visible={addModal} transparent animationType="slide" onRequestClose={() => setAddModal(false)}>
         <KeyboardAvoidingView style={m.overlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-          <View style={m.sheet}>
-            <View style={m.handle} />
+          <Animated.View style={[m.sheet, { transform: [{ translateY: addSwipeY }] }]}>
+            <View style={m.handle} {...addModalPan.panHandlers} hitSlop={{ top: 10, bottom: 20, left: 100, right: 100 }} />
             <Text style={m.title}>Add Driver</Text>
             <DriverForm
               f={form}
@@ -314,16 +371,18 @@ export default function DriverManagementScreen() {
               onSave={handleAdd}
               onCancel={() => setAddModal(false)}
               submitLabel="Add Driver"
+              saving={saving}
+              onPickImage={pickImage}
             />
-          </View>
+          </Animated.View>
         </KeyboardAvoidingView>
       </Modal>
 
       {/* View/Edit Modal */}
       <Modal visible={viewModal} transparent animationType="slide" onRequestClose={() => { setViewModal(false); setIsEditing(false); }}>
         <KeyboardAvoidingView style={m.overlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-          <View style={m.sheet}>
-            <View style={m.handle} />
+          <Animated.View style={[m.sheet, { transform: [{ translateY: viewSwipeY }] }]}>
+            <View style={m.handle} {...viewModalPan.panHandlers} hitSlop={{ top: 10, bottom: 20, left: 100, right: 100 }} />
             <Text style={m.title}>{isEditing ? 'Edit Driver' : 'Driver Details'}</Text>
 
             {isEditing ? (
@@ -333,6 +392,8 @@ export default function DriverManagementScreen() {
                 onSave={handleSaveEdit}
                 onCancel={() => setIsEditing(false)}
                 submitLabel="Save Changes"
+                saving={saving}
+                onPickImage={pickImage}
               />
             ) : (
               <ScrollView showsVerticalScrollIndicator={false}>
@@ -350,14 +411,23 @@ export default function DriverManagementScreen() {
                   { label: 'Address', value: selected?.address },
                   { label: 'Aadhaar', value: selected?.aadhaarCard },
                   { label: 'PAN Card', value: selected?.panCard },
+                  { label: 'Email', value: (selected as any)?.email || '—' },
                 ].map(row => (
                   <View key={row.label} style={dv.row}>
                     <Text style={dv.label}>{row.label}</Text>
                     <Text style={dv.value}>{row.value || '—'}</Text>
                   </View>
                 ))}
+                <View style={dv.row}>
+                  <Text style={dv.label}>Account</Text>
+                  <View style={[dv.statusBadge, { backgroundColor: selected?.userId ? '#d1fae5' : '#fef3c7' }]}>
+                    <Text style={[dv.statusText, { color: selected?.userId ? '#065f46' : '#92400e' }]}>
+                      {selected?.userId ? '✓ Linked' : '⏳ Pending signup'}
+                    </Text>
+                  </View>
+                </View>
                 <View style={dv.btns}>
-                  <TouchableOpacity style={dv.editBtn} onPress={() => { setEditForm({ fullName: selected!.fullName, age: selected!.age.toString(), address: selected!.address, aadhaarCard: selected!.aadhaarCard, panCard: selected!.panCard, vehicleOwned: selected!.vehicleOwned ?? '', photoUrl: selected!.photoUrl }); setIsEditing(true); }} activeOpacity={0.85}>
+                  <TouchableOpacity style={dv.editBtn} onPress={() => { setEditForm({ fullName: selected!.fullName, age: selected!.age.toString(), address: selected!.address, aadhaarCard: selected!.aadhaarCard, panCard: selected!.panCard, vehicleOwned: selected!.vehicleOwned ?? '', photoUrl: selected!.photoUrl, email: (selected as any).email ?? '' }); setIsEditing(true); }} activeOpacity={0.85}>
                     <Text style={dv.editBtnText}>Edit</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={dv.deleteBtn} onPress={handleDelete} activeOpacity={0.85}>
@@ -369,7 +439,7 @@ export default function DriverManagementScreen() {
                 </View>
               </ScrollView>
             )}
-          </View>
+          </Animated.View>
         </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
@@ -443,6 +513,12 @@ const s = {
   emptyIcon: { fontSize: 48, marginBottom: Spacing[3] },
   emptyText: { fontSize: FontSize.md, fontWeight: '700' as const, color: Colors.textSecondary },
   emptySub: { fontSize: FontSize.sm, color: Colors.textMuted, marginTop: Spacing[1], textAlign: 'center' as const },
+  statusPill: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: Radius.full,
+  },
+  statusPillText: { fontSize: 10, fontWeight: '700' as const },
 };
 
 const m = {
@@ -556,4 +632,10 @@ const dv = {
     borderColor: Colors.border,
   },
   closeBtnText: { color: Colors.textSecondary, fontWeight: '600' as const, fontSize: FontSize.base },
+  statusBadge: {
+    paddingHorizontal: Spacing[3],
+    paddingVertical: 4,
+    borderRadius: Radius.full,
+  },
+  statusText: { fontSize: FontSize.xs, fontWeight: '700' as const },
 };
