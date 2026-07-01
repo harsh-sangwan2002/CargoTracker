@@ -51,6 +51,14 @@ const ITEMS: ManageItem[] = [
     color: Colors.warning,
     roles: ['manager', 'admin'],
   },
+  {
+    title: 'Vehicles',
+    subtitle: 'Add and manage fleet vehicles',
+    icon: '🚛',
+    screen: 'VehicleManagement',
+    color: Colors.info,
+    roles: ['manager', 'admin'],
+  },
 ];
 
 export default function ManageHubScreen({ role }: Props) {

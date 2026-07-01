@@ -10,9 +10,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
-import { auth } from '../firebaseConfig';
-import { getTrips, getTripsByUser, TripFirestore } from '../services/tripService';
-import { getDrivers } from '../services/driverService';
+import { auth } from '../supabaseConfig';
+import { getTrips, getTripsByUser, subscribeToDriverTrips, TripRecord } from '../services/tripService';
+import { getDrivers, Driver } from '../services/driverService';
+import { getVehicles, Vehicle } from '../services/vehicleService';
+import { getUpcomingMaintenance, VehicleMaintenance } from '../services/vehicleMaintenanceService';
 import { updateDriverLocation, clearDriverTracking } from '../services/locationService';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
 import { ShimmerBox } from '../components/Shimmer';
@@ -33,8 +35,11 @@ const startOfWeek = (d: Date) => { const n = new Date(d); n.setDate(n.getDate() 
 
 export default function DashboardScreen({ role, onTabPress }: Props) {
   const user = auth.currentUser;
-  const [trips, setTrips] = useState<(TripFirestore & { id: string })[]>([]);
+  const [trips, setTrips] = useState<(TripRecord & { id: string })[]>([]);
   const [driverCount, setDriverCount] = useState(0);
+  const [drivers, setDrivers] = useState<(Driver & { id: string })[]>([]);
+  const [vehicles, setVehicles] = useState<(Vehicle & { id: string })[]>([]);
+  const [upcomingMaintenance, setUpcomingMaintenance] = useState<(VehicleMaintenance & { id: string })[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isTracking, setIsTracking] = useState(false);
@@ -80,12 +85,19 @@ export default function DashboardScreen({ role, onTabPress }: Props) {
 
   const load = async () => {
     try {
-      const [fetchedTrips, drivers] = await Promise.all([
+      const [fetchedTrips, fetchedDrivers, fetchedVehicles, fetchedMaintenance] = await Promise.all([
         role === 'driver' ? getTripsByUser(user?.uid ?? '') : getTrips(),
         role !== 'driver' ? getDrivers() : Promise.resolve([]),
+        role !== 'driver' ? getVehicles() : Promise.resolve([]),
+        role !== 'driver' ? getUpcomingMaintenance(30).catch(() => []) : Promise.resolve([]),
       ]);
       setTrips(fetchedTrips);
-      if (role !== 'driver') setDriverCount(drivers.length);
+      if (role !== 'driver') {
+        setDriverCount(fetchedDrivers.length);
+        setDrivers(fetchedDrivers);
+        setVehicles(fetchedVehicles);
+        setUpcomingMaintenance(fetchedMaintenance);
+      }
     } catch (e) {
       console.error(e);
     } finally {
@@ -94,7 +106,13 @@ export default function DashboardScreen({ role, onTabPress }: Props) {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    if (role === 'driver' && user?.uid) {
+      const unsub = subscribeToDriverTrips(user.uid, setTrips);
+      return unsub;
+    }
+  }, []);
 
   const onRefresh = () => { setRefreshing(true); load(); };
 
@@ -104,6 +122,33 @@ export default function DashboardScreen({ role, onTabPress }: Props) {
   const weekTrips = trips.filter(t => t.departureTime && t.departureTime >= startOfWeek(now));
   const totalFuelWeek = weekTrips.reduce((sum, t) => sum + (parseFloat(t.fuelFilled) || 0), 0);
   const recentTrips = trips.slice(0, 8);
+
+  // Compliance alerts: licenses/insurance/permit/PUC expiring within 30 days (or already expired)
+  const daysUntil = (dateStr?: string) => {
+    if (!dateStr) return null;
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return null;
+    return Math.ceil((d.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+  };
+  const vehicleRegById = Object.fromEntries(vehicles.map(v => [v.id, v.registrationNumber]));
+  const expiringDocs = role !== 'driver'
+    ? [
+        ...drivers
+          .map(d => ({ label: `${d.fullName} · License`, days: daysUntil(d.licenseExpiry) }))
+          .filter((x): x is { label: string; days: number } => x.days !== null && x.days <= 30),
+        ...vehicles.flatMap(v => [
+          { label: `${v.registrationNumber} · Insurance`, days: daysUntil(v.insuranceExpiry) },
+          { label: `${v.registrationNumber} · Permit`, days: daysUntil(v.permitExpiry) },
+          { label: `${v.registrationNumber} · PUC`, days: daysUntil(v.pucExpiry) },
+        ]).filter((x): x is { label: string; days: number } => x.days !== null && x.days <= 30),
+        ...upcomingMaintenance
+          .map(m => ({
+            label: `${vehicleRegById[m.vehicleId] ?? 'Vehicle'} · ${m.maintenanceType} due`,
+            days: daysUntil(m.nextServiceDueDate),
+          }))
+          .filter((x): x is { label: string; days: number } => x.days !== null && x.days <= 30),
+      ].sort((a, b) => a.days - b.days)
+    : [];
 
   const roleLabel = role === 'admin' ? 'Admin' : role === 'manager' ? 'Manager' : 'Driver';
   const roleColor = role === 'admin' ? Colors.roleAdmin : role === 'manager' ? Colors.roleManager : Colors.roleDriver;
@@ -222,6 +267,21 @@ export default function DashboardScreen({ role, onTabPress }: Props) {
               <View key={i} style={s.statCard}>
                 <Text style={[s.statValue, { color: st.color }]}>{st.value}</Text>
                 <Text style={s.statLabel}>{st.label}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* Compliance Alerts (Manager/Admin) */}
+        {role !== 'driver' && expiringDocs.length > 0 && (
+          <View style={s.alertsCard}>
+            <Text style={s.alertsTitle}>⚠ Documents Expiring Soon</Text>
+            {expiringDocs.slice(0, 6).map((doc, i) => (
+              <View key={i} style={[s.alertRow, i === Math.min(expiringDocs.length, 6) - 1 && { borderBottomWidth: 0 }]}>
+                <Text style={s.alertLabel}>{doc.label}</Text>
+                <Text style={[s.alertDays, doc.days < 0 && { color: Colors.danger }]}>
+                  {doc.days < 0 ? `Expired ${Math.abs(doc.days)}d ago` : doc.days === 0 ? 'Expires today' : `${doc.days}d left`}
+                </Text>
               </View>
             ))}
           </View>
@@ -373,6 +433,27 @@ const s = {
   },
   statValue: { fontSize: FontSize['3xl'], fontWeight: '800' as const, letterSpacing: -1 },
   statLabel: { fontSize: FontSize.sm, color: Colors.textSecondary, marginTop: Spacing[1], fontWeight: '500' as const },
+
+  alertsCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.lg,
+    padding: Spacing[4],
+    marginBottom: Spacing[5],
+    borderLeftWidth: 4,
+    borderLeftColor: Colors.warning,
+    ...Shadow.md,
+  },
+  alertsTitle: { fontSize: FontSize.base, fontWeight: '700' as const, color: Colors.text, marginBottom: Spacing[2] },
+  alertRow: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  alertLabel: { fontSize: FontSize.sm, color: Colors.text, flex: 1 },
+  alertDays: { fontSize: FontSize.xs, color: Colors.warning, fontWeight: '700' as const },
 
   tripList: {
     backgroundColor: Colors.surface,

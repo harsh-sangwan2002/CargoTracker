@@ -2,10 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, ActivityIndicator } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { onAuthStateChanged } from 'firebase/auth';
-
-import { auth } from './firebaseConfig';
+import { onAuthStateChanged } from './supabaseConfig';
 import { Colors, FontSize, Radius, Shadow, Spacing } from './utils/theme';
+import { initOfflineQueueSync } from './utils/offlineQueue';
 
 import LoginScreen from './screens/LoginScreen';
 import RegisterScreen from './screens/RegisterScreen';
@@ -13,6 +12,7 @@ import MainTabsScreen from './screens/MainTabsScreen';
 import DriverManagementScreen from './screens/DriverManagementScreen';
 import UserManagementScreen from './screens/UserManagementScreen';
 import PlantManagementScreen from './screens/PlantManagementScreen';
+import VehicleManagementScreen from './screens/VehicleManagementScreen';
 import LiveMapScreen from './screens/LiveMapScreen';
 
 const Stack = createNativeStackNavigator();
@@ -24,6 +24,7 @@ export type RootStackParamList = {
   DriverManagement: undefined;
   UserManagement: undefined;
   PlantManagement: undefined;
+  VehicleManagement: undefined;
   LiveMap: undefined;
 };
 
@@ -31,10 +32,23 @@ export default function App() {
   const [user, setUser] = useState<any>(undefined);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      setUser(firebaseUser);
+    initOfflineQueueSync();
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    let unsubscribe: (() => void) | undefined;
+
+    onAuthStateChanged((supabaseUser) => {
+      if (mounted) setUser(supabaseUser);
+    }).then((cleanup) => {
+      unsubscribe = cleanup;
     });
-    return unsubscribe;
+
+    return () => {
+      mounted = false;
+      unsubscribe?.();
+    };
   }, []);
 
   if (user === undefined) {
@@ -69,6 +83,11 @@ export default function App() {
             <Stack.Screen
               name="PlantManagement"
               component={PlantManagementScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="VehicleManagement"
+              component={VehicleManagementScreen}
               options={{ animation: 'slide_from_right' }}
             />
             <Stack.Screen

@@ -28,10 +28,16 @@ ios/DerivedData/
 ios/*.xcworkspace
 
 # -------------------------
+# Supabase CLI local cache
+# -------------------------
+supabase/.temp/
+
+# -------------------------
 # Environment variables
 # -------------------------
 .env
 .env.*
+!.env.example
 
 # -------------------------
 # OS / Editor

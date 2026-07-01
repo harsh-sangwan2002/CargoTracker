@@ -13,9 +13,8 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { signOut, EmailAuthProvider, reauthenticateWithCredential, deleteUser } from 'firebase/auth';
 import { useNavigation } from '@react-navigation/native';
-import { auth } from '../firebaseConfig';
+import { auth, reauthenticateWithPassword, signOut } from '../supabaseConfig';
 import { deleteUserAccountData } from '../services/userService';
 import { getDriverByUserId, getDriverByEmail, addDriver, updateDriver, Driver } from '../services/driverService';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
@@ -149,7 +148,7 @@ export default function ProfileScreen({ role, profileComplete = true, onProfileS
   const handleLogout = () => {
     Alert.alert('Sign out', 'Are you sure you want to sign out?', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Sign Out', style: 'destructive', onPress: () => signOut(auth) },
+      { text: 'Sign Out', style: 'destructive', onPress: () => signOut() },
     ]);
   };
 
@@ -158,13 +157,12 @@ export default function ProfileScreen({ role, profileComplete = true, onProfileS
     if (!user?.email) return;
     setDeleting(true);
     try {
-      const cred = EmailAuthProvider.credential(user.email, deletePass);
-      await reauthenticateWithCredential(user, cred);
+      await reauthenticateWithPassword(user.email, deletePass);
       await deleteUserAccountData(user.uid);
-      await deleteUser(user);
+      await signOut();
       setDeleteModal(false);
     } catch (err: any) {
-      Alert.alert('Error', err.code === 'auth/wrong-password' ? 'Incorrect password.' : 'Failed to delete account.');
+      Alert.alert('Error', err.message?.toLowerCase?.().includes('invalid') ? 'Incorrect password.' : 'Failed to delete account.');
     } finally {
       setDeleting(false);
     }
@@ -320,8 +318,8 @@ export default function ProfileScreen({ role, profileComplete = true, onProfileS
             style={[s.actionBtn, s.dangerBtn]}
             onPress={() => {
               Alert.alert(
-                'Delete Account',
-                'This will permanently delete your account and all associated data. This cannot be undone.',
+                'Delete App Data',
+                'This will permanently delete your Cargo Tracker profile data and sign you out. Supabase Auth account deletion requires an admin backend.',
                 [
                   { text: 'Cancel', style: 'cancel' },
                   { text: 'Continue', style: 'destructive', onPress: () => setDeleteModal(true) },
@@ -331,19 +329,19 @@ export default function ProfileScreen({ role, profileComplete = true, onProfileS
             activeOpacity={0.8}
           >
             <Text style={s.actionIcon}>🗑️</Text>
-            <Text style={[s.actionLabel, { color: Colors.danger }]}>Delete Account</Text>
+            <Text style={[s.actionLabel, { color: Colors.danger }]}>Delete App Data</Text>
             <Text style={[s.actionArrow, { color: Colors.danger }]}>›</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
 
-      {/* Delete Account Modal */}
+      {/* Delete App Data Modal */}
       <Modal visible={deleteModal} transparent animationType="fade" onRequestClose={() => !deleting && setDeleteModal(false)}>
         <KeyboardAvoidingView style={s.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <Pressable style={s.modalOverlay} onPress={() => !deleting && setDeleteModal(false)}>
             <View style={s.modalCard} onStartShouldSetResponder={() => true}>
               <Text style={s.modalTitle}>Confirm Deletion</Text>
-              <Text style={s.modalSub}>Enter your password to permanently delete your account.</Text>
+              <Text style={s.modalSub}>Enter your password to delete your app profile data.</Text>
               <TextInput
                 style={s.modalInput}
                 placeholder="Password"

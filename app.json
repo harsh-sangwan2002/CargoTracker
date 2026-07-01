@@ -24,7 +24,8 @@
     },
     "owner": "harsh-sangwan",
     "plugins": [
-      "expo-font"
+      "expo-font",
+      "expo-notifications"
     ]
   }
 }

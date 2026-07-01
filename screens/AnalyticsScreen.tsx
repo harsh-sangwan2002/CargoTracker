@@ -1,4 +1,4 @@
-import React, {useState, useEffect, useMemo} from 'react';
+import React, {useState, useEffect, useMemo, useRef} from 'react';
 import {
   View,
   Text,
@@ -9,13 +9,17 @@ import {
   Modal,
   TextInput,
   Pressable,
-  Platform
+  Platform,
+  Animated,
+  PanResponder
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import {SafeAreaView} from 'react-native-safe-area-context';
-import {auth} from '../firebaseConfig';
-import {getTrips, getTripsByUser, TripFirestore} from '../services/tripService';
+import {auth} from '../supabaseConfig';
+import {getTrips, getTripsByUser, TripRecord} from '../services/tripService';
 import {getDrivers, Driver} from '../services/driverService';
+import {getVehicles, Vehicle} from '../services/vehicleService';
+import {vehicleStatsFromTrips} from '../services/analyticsService';
 import {Colors, FontSize, Radius, Shadow, Spacing} from '../utils/theme';
 import {ShimmerStatsRow, ShimmerList} from '../components/Shimmer';
 import type {UserRole} from './MainTabsScreen';
@@ -128,13 +132,18 @@ function DriverSummaryCard({
   name,
   trips,
   fuel,
-  distance
+  distance,
+  completedTrips,
+  avgTripHours,
 }: {
   name: string;
   trips: number;
   fuel: number;
   distance: number;
+  completedTrips: number;
+  avgTripHours: number | null;
 }) {
+  const completionPct = trips > 0 ? Math.round((completedTrips / trips) * 100) : 0;
   return (
     <View style={ds.card}>
       <View style={ds.avatar}>
@@ -148,6 +157,10 @@ function DriverSummaryCard({
           </Text>
           <Text style={ds.meta}>⛽ {fuel.toFixed(0)} L</Text>
           {distance > 0 && <Text style={ds.meta}>📏 {distance.toFixed(0)} km</Text>}
+        </View>
+        <View style={ds.metaRow}>
+          <Text style={ds.meta}>✅ {completionPct}% completed</Text>
+          {avgTripHours !== null && <Text style={ds.meta}>⏱ {avgTripHours.toFixed(1)}h avg</Text>}
         </View>
       </View>
     </View>
@@ -180,13 +193,14 @@ const ds = {
 export default function AnalyticsScreen({role}: Props) {
   const user = auth.currentUser;
 
-  const [allTrips, setAllTrips] = useState<(TripFirestore & {id: string})[]>([]);
+  const [allTrips, setAllTrips] = useState<(TripRecord & {id: string})[]>([]);
   const [drivers, setDrivers] = useState<(Driver & {id: string})[]>([]);
+  const [vehicles, setVehicles] = useState<(Vehicle & {id: string})[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   // Date range
-  const [dateRange, setDateRange] = useState<DateRange>('month');
+  const [dateRange, setDateRange] = useState<DateRange>('all');
   const [customFrom, setCustomFrom] = useState<Date>(() => startOfMonth(new Date()));
   const [customTo, setCustomTo] = useState<Date>(() => endOfDay(new Date()));
   const [showFromPicker, setShowFromPicker] = useState(false);
@@ -194,19 +208,57 @@ export default function AnalyticsScreen({role}: Props) {
   const [tempDate, setTempDate] = useState(new Date());
   const [pickerTarget, setPickerTarget] = useState<'from' | 'to'>('from');
 
-  // Driver filter (searchable)
+  const closeDatePicker = () => {
+    setShowFromPicker(false);
+    setShowToPicker(false);
+  };
+
+  const dateSheetSwipeY = useRef(new Animated.Value(0)).current;
+  const dateSheetPan = useRef(PanResponder.create({
+    onMoveShouldSetPanResponder: (_, gs) => gs.dy > 4 && Math.abs(gs.dy) > Math.abs(gs.dx),
+    onPanResponderMove: (_, gs) => { if (gs.dy > 0) dateSheetSwipeY.setValue(gs.dy); },
+    onPanResponderRelease: (_, gs) => {
+      if (gs.dy > 120 || gs.vy > 0.5) {
+        Animated.timing(dateSheetSwipeY, { toValue: 800, duration: 200, useNativeDriver: true })
+          .start(() => { dateSheetSwipeY.setValue(0); closeDatePicker(); });
+      } else {
+        Animated.spring(dateSheetSwipeY, { toValue: 0, useNativeDriver: true }).start();
+      }
+    },
+  })).current;
+
+  // Driver filter (searchable) — stores the driver's id ('all' for no filter),
+  // since names alone can't disambiguate two drivers who share the same name.
   const [driverSearch, setDriverSearch] = useState('');
   const [driverFilter, setDriverFilter] = useState<string>('all');
   const [showDriverDropdown, setShowDriverDropdown] = useState(false);
 
+  const driversById = useMemo(() => new Map(drivers.map(d => [d.id, d])), [drivers]);
+  const selectedDriver = driverFilter !== 'all' ? driversById.get(driverFilter) : undefined;
+
+  const maskAadhaar = (aadhaar?: string) => {
+    const digits = (aadhaar ?? '').replace(/\D/g, '');
+    return digits.length >= 4 ? `•••• •••• ${digits.slice(-4)}` : '';
+  };
+
+  // A trip belongs to a driver if its driverId matches; trips created before the
+  // relational migration may lack driverId, so fall back to a name match for those.
+  const tripMatchesDriver = (t: TripRecord, driverId: string) => {
+    if (t.driverId) return t.driverId === driverId;
+    const d = driversById.get(driverId);
+    return !!d && t.driverName === d.fullName;
+  };
+
   const load = async () => {
     try {
-      const [t, d] = await Promise.all([
+      const [t, d, v] = await Promise.all([
         role === 'driver' ? getTripsByUser(user?.uid ?? '') : getTrips(),
-        getDrivers()
+        getDrivers(),
+        getVehicles()
       ]);
       setAllTrips(t);
       setDrivers(d);
+      setVehicles(v);
     } catch (e) {
       console.error(e);
     } finally {
@@ -242,10 +294,10 @@ export default function AnalyticsScreen({role}: Props) {
     return allTrips.filter((t) => {
       if (rangeStart && t.departureTime && t.departureTime < rangeStart) return false;
       if (rangeEnd && t.departureTime && t.departureTime > rangeEnd) return false;
-      if (driverFilter !== 'all' && t.driverName !== driverFilter) return false;
+      if (driverFilter !== 'all' && !tripMatchesDriver(t, driverFilter)) return false;
       return true;
     });
-  }, [allTrips, rangeStart, rangeEnd, driverFilter]);
+  }, [allTrips, rangeStart, rangeEnd, driverFilter, driversById]);
 
   /* ── Summary stats ─────────────────────────────────────────────── */
   const totalTrips = filtered.length;
@@ -256,26 +308,49 @@ export default function AnalyticsScreen({role}: Props) {
   const avgFuel = totalTrips > 0 ? (totalFuel / totalTrips).toFixed(1) : '0';
 
   /* ── Trips per driver ──────────────────────────────────────────── */
+  // Grouped by driverId (not name) so two drivers sharing a name aren't merged into
+  // one row; legacy trips without a driverId still fall back to grouping by name.
   const driverStats = useMemo(() => {
-    const map: Record<string, {trips: number; fuel: number; distance: number}> = {};
+    const map: Record<string, {label: string; trips: number; fuel: number; distance: number; completedTrips: number; totalTripHours: number}> = {};
     filtered.forEach((t) => {
-      const name = t.driverName || 'Unknown';
-      if (!map[name]) map[name] = {trips: 0, fuel: 0, distance: 0};
-      map[name].trips++;
-      map[name].fuel += parseFloat(t.fuelFilled) || 0;
-      map[name].distance += parseFloat(t.distanceTravelled ?? '0') || 0;
+      const key = t.driverId || `name:${t.driverName || 'Unknown'}`;
+      const driver = t.driverId ? driversById.get(t.driverId) : undefined;
+      if (!map[key]) map[key] = { label: driver?.fullName || t.driverName || 'Unknown', trips: 0, fuel: 0, distance: 0, completedTrips: 0, totalTripHours: 0 };
+      map[key].trips++;
+      map[key].fuel += parseFloat(t.fuelFilled) || 0;
+      map[key].distance += parseFloat(t.distanceTravelled ?? '0') || 0;
+      if (t.arrivalTime) {
+        map[key].completedTrips++;
+        const hours = (t.arrivalTime.getTime() - t.departureTime.getTime()) / (1000 * 60 * 60);
+        if (hours > 0) map[key].totalTripHours += hours;
+      }
     });
+
+    const labelCounts: Record<string, number> = {};
+    Object.values(map).forEach(v => { labelCounts[v.label] = (labelCounts[v.label] || 0) + 1; });
+
     return Object.entries(map)
+      .map(([key, v]) => {
+        let label = v.label;
+        if (labelCounts[v.label] > 1) {
+          const aadhaar = maskAadhaar(driversById.get(key)?.aadhaarCard);
+          if (aadhaar) label = `${v.label} (${aadhaar})`;
+        }
+        return [label, v] as [string, typeof v];
+      })
       .sort((a, b) => b[1].trips - a[1].trips)
       .slice(0, 10);
-  }, [filtered]);
+  }, [filtered, driversById]);
 
   const driverChartData = driverStats.map(([label, v]) => ({label, value: v.trips}));
+
+  /* ── Per-truck distance & fuel breakdown ───────────────────────── */
+  const vehicleStats = useMemo(() => vehicleStatsFromTrips(filtered, vehicles), [filtered, vehicles]);
 
   /* ── Fixed 7-day chart using reliable date keys ────────────────── */
   const dayChartData = useMemo(() => {
     // Always use all trips filtered only by driver (not date range) so we always see last 7 days
-    const driverOnlyFiltered = allTrips.filter((t) => driverFilter === 'all' || t.driverName === driverFilter);
+    const driverOnlyFiltered = allTrips.filter((t) => driverFilter === 'all' || tripMatchesDriver(t, driverFilter));
 
     const last7: {key: string; label: string}[] = [];
     for (let i = 6; i >= 0; i--) {
@@ -299,7 +374,7 @@ export default function AnalyticsScreen({role}: Props) {
     });
 
     return last7.map((d) => ({label: d.label, value: countMap[d.key]}));
-  }, [allTrips, driverFilter]);
+  }, [allTrips, driverFilter, driversById]);
 
   /* ── Driver dropdown list (filtered by search) ─────────────────── */
   const filteredDriverList = useMemo(() => {
@@ -328,7 +403,7 @@ export default function AnalyticsScreen({role}: Props) {
     else setCustomTo(endOfDay(date));
   };
 
-  const selectedDriverLabel = driverFilter === 'all' ? 'All Drivers' : driverFilter;
+  const selectedDriverLabel = driverFilter === 'all' ? 'All Drivers' : (selectedDriver?.fullName ?? 'Unknown Driver');
 
   return (
     <SafeAreaView style={s.safe}>
@@ -429,14 +504,14 @@ export default function AnalyticsScreen({role}: Props) {
           {/* Selected badge */}
           {driverFilter !== 'all' && (
             <View style={s.selectedBadge}>
-              <Text style={s.selectedBadgeText}>Filtered: {driverFilter}</Text>
+              <Text style={s.selectedBadgeText}>Filtered: {selectedDriverLabel}</Text>
             </View>
           )}
 
           {/* Dropdown */}
           {showDriverDropdown && (
             <View style={s.driverDropdown}>
-              <ScrollView nestedScrollEnabled style={{maxHeight: 200}} keyboardShouldPersistTaps="handled">
+              <ScrollView nestedScrollEnabled style={{maxHeight: 240}} keyboardShouldPersistTaps="handled">
                 <TouchableOpacity
                   style={[s.driverOption, driverFilter === 'all' && s.driverOptionActive]}
                   onPress={() => {
@@ -454,21 +529,22 @@ export default function AnalyticsScreen({role}: Props) {
                   </View>
                 ) : (
                   filteredDriverList.map((d) => {
-                    const tripCount = allTrips.filter((t) => t.driverName === d.fullName).length;
+                    const tripCount = allTrips.filter((t) => tripMatchesDriver(t, d.id)).length;
+                    const aadhaar = maskAadhaar(d.aadhaarCard);
                     return (
                       <TouchableOpacity
                         key={d.id}
-                        style={[s.driverOption, driverFilter === d.fullName && s.driverOptionActive]}
+                        style={[s.driverOption, driverFilter === d.id && s.driverOptionActive]}
                         onPress={() => {
-                          setDriverFilter(d.fullName);
+                          setDriverFilter(d.id);
                           setDriverSearch(d.fullName);
                           setShowDriverDropdown(false);
                         }}>
-                        <Text style={[s.driverOptionText, driverFilter === d.fullName && s.driverOptionTextActive]}>
+                        <Text style={[s.driverOptionText, driverFilter === d.id && s.driverOptionTextActive]}>
                           {d.fullName}
                         </Text>
                         <Text style={s.driverOptionSub}>
-                          {tripCount} trip{tripCount !== 1 ? 's' : ''}
+                          {aadhaar ? `Aadhaar ${aadhaar} · ` : ''}{tripCount} trip{tripCount !== 1 ? 's' : ''}
                         </Text>
                       </TouchableOpacity>
                     );
@@ -503,7 +579,7 @@ export default function AnalyticsScreen({role}: Props) {
                 <Text style={s.chartTitle}>Driver Breakdown</Text>
                 <Text style={s.chartSub}>
                   {rangeLabels[dateRange]}
-                  {driverFilter !== 'all' ? ` · ${driverFilter}` : ''}
+                  {driverFilter !== 'all' ? ` · ${selectedDriverLabel}` : ''}
                 </Text>
 
                 {/* Bar chart */}
@@ -513,7 +589,40 @@ export default function AnalyticsScreen({role}: Props) {
 
                 {/* Detailed per-driver rows */}
                 {driverStats.map(([name, v]) => (
-                  <DriverSummaryCard key={name} name={name} trips={v.trips} fuel={v.fuel} distance={v.distance} />
+                  <DriverSummaryCard
+                    key={name}
+                    name={name}
+                    trips={v.trips}
+                    fuel={v.fuel}
+                    distance={v.distance}
+                    completedTrips={v.completedTrips}
+                    avgTripHours={v.completedTrips > 0 ? v.totalTripHours / v.completedTrips : null}
+                  />
+                ))}
+              </View>
+            )}
+
+            {/* ── Per Truck breakdown ─────────────────────────────── */}
+            {vehicleStats.length > 0 && (
+              <View style={s.chartCard}>
+                <Text style={s.chartTitle}>Per Truck</Text>
+                <Text style={s.chartSub}>Distance & fuel · {rangeLabels[dateRange]}</Text>
+
+                {vehicleStats.map(v => (
+                  <View key={v.vehicleId} style={ds.card}>
+                    <View style={ds.avatar}>
+                      <Text style={ds.avatarText}>🚛</Text>
+                    </View>
+                    <View style={{flex: 1}}>
+                      <Text style={ds.name}>{v.registrationNumber}</Text>
+                      <View style={ds.metaRow}>
+                        <Text style={ds.meta}>🚛 {v.trips} trip{v.trips !== 1 ? 's' : ''}</Text>
+                        <Text style={ds.meta}>📏 {v.distanceKm.toFixed(0)} km</Text>
+                        <Text style={ds.meta}>⛽ {v.fuelLiters.toFixed(0)} L</Text>
+                        {v.kmPerLiter !== null && <Text style={ds.meta}>⚙️ {v.kmPerLiter.toFixed(1)} km/L</Text>}
+                      </View>
+                    </View>
+                  </View>
                 ))}
               </View>
             )}
@@ -522,7 +631,7 @@ export default function AnalyticsScreen({role}: Props) {
             <View style={s.chartCard}>
               <Text style={s.chartTitle}>Last 7 Days</Text>
               <Text style={s.chartSub}>
-                Trips by departure date{driverFilter !== 'all' ? ` · ${driverFilter}` : ''}
+                Trips by departure date{driverFilter !== 'all' ? ` · ${selectedDriverLabel}` : ''}
               </Text>
               {dayChartData.every((d) => d.value === 0) ? (
                 <Text
@@ -553,13 +662,13 @@ export default function AnalyticsScreen({role}: Props) {
           transparent
           visible
           animationType="slide"
-          onRequestClose={() => {
-            setShowFromPicker(false);
-            setShowToPicker(false);
-          }}>
+          onRequestClose={closeDatePicker}>
           <View style={dp.overlay}>
-            <View style={dp.sheet}>
-              <Text style={dp.sheetTitle}>{showFromPicker ? 'Select From Date' : 'Select To Date'}</Text>
+            <Animated.View style={[dp.sheet, { transform: [{ translateY: dateSheetSwipeY }] }]}>
+              <View style={dp.dragHeader} {...dateSheetPan.panHandlers}>
+                <View style={dp.handle} />
+                <Text style={dp.sheetTitle}>{showFromPicker ? 'Select From Date' : 'Select To Date'}</Text>
+              </View>
               <DateTimePicker
                 value={tempDate}
                 mode="date"
@@ -568,8 +677,7 @@ export default function AnalyticsScreen({role}: Props) {
                   if (d) setTempDate(d);
                   if (Platform.OS === 'android') {
                     if (d) applyDate(d);
-                    setShowFromPicker(false);
-                    setShowToPicker(false);
+                    closeDatePicker();
                   }
                 }}
                 maximumDate={pickerTarget === 'from' ? customTo : new Date()}
@@ -577,26 +685,20 @@ export default function AnalyticsScreen({role}: Props) {
               />
               {Platform.OS === 'ios' && (
                 <View style={dp.iosBtns}>
-                  <Pressable
-                    style={dp.cancelBtn}
-                    onPress={() => {
-                      setShowFromPicker(false);
-                      setShowToPicker(false);
-                    }}>
+                  <Pressable style={dp.cancelBtn} onPress={closeDatePicker}>
                     <Text style={dp.cancelText}>Cancel</Text>
                   </Pressable>
                   <Pressable
                     style={dp.confirmBtn}
                     onPress={() => {
                       applyDate(tempDate);
-                      setShowFromPicker(false);
-                      setShowToPicker(false);
+                      closeDatePicker();
                     }}>
                     <Text style={dp.confirmText}>Confirm</Text>
                   </Pressable>
                 </View>
               )}
-            </View>
+            </Animated.View>
           </View>
         </Modal>
       )}
@@ -752,7 +854,20 @@ const dp = {
     backgroundColor: Colors.surface,
     borderTopLeftRadius: Radius.xl,
     borderTopRightRadius: Radius.xl,
-    paddingTop: Spacing[4]
+    paddingTop: Spacing[1]
+  },
+  dragHeader: {
+    alignItems: 'center' as const,
+    paddingTop: Spacing[1],
+    paddingBottom: Spacing[1]
+  },
+  handle: {
+    width: 40,
+    height: 4,
+    backgroundColor: Colors.border,
+    borderRadius: 2,
+    alignSelf: 'center' as const,
+    marginBottom: Spacing[3]
   },
   sheetTitle: {
     fontSize: FontSize.md,

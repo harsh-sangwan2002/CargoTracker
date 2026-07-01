@@ -1,19 +1,6 @@
-import {
-  collection,
-  doc,
-  getDocs,
-  setDoc,
-  getDoc,
-  updateDoc,
-  deleteDoc,
-  writeBatch,
-  query,
-  where,
-  serverTimestamp
-} from 'firebase/firestore';
-import {db} from '../firebaseConfig';
-import {File} from 'expo-file-system';
-import {getDrivers} from './driverService';
+import { File } from 'expo-file-system';
+import { supabase } from '../supabaseConfig';
+import { getDrivers } from './driverService';
 
 export interface UserProfile {
   uid: string;
@@ -22,61 +9,60 @@ export interface UserProfile {
   createdAt?: any;
 }
 
-const usersRef = collection(db, 'users');
-
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
+
+const mapUserRow = (row: any): UserProfile => ({
+  uid: row.id,
+  email: row.email,
+  role: row.role,
+  createdAt: row.created_at,
+});
 
 export const createUserProfile = async (
   uid: string,
   email: string,
   role: 'driver' | 'manager' | 'admin' = 'driver'
 ) => {
-  try {
-    const userDocRef = doc(db, 'users', uid);
-    await setDoc(userDocRef, {
-      uid,
-      email: normalizeEmail(email),
-      role,
-      createdAt: new Date()
-    });
-  } catch (error) {
-    console.error('Error creating user profile:', error);
-    throw error;
-  }
+  const { error } = await supabase.from('profiles').upsert({
+    id: uid,
+    email: normalizeEmail(email),
+    role,
+  });
+  if (error) throw error;
 };
 
 export const getUserProfile = async (uid: string): Promise<UserProfile | null> => {
-  try {
-    const userDocRef = doc(db, 'users', uid);
-    const userDoc = await getDoc(userDocRef);
+  const { data, error } = await supabase.from('profiles').select('*').eq('id', uid).maybeSingle();
+  if (error) throw error;
+  return data ? mapUserRow(data) : null;
+};
 
-    if (userDoc.exists()) {
-      return userDoc.data() as UserProfile;
-    }
-    return null;
-  } catch (error) {
-    console.error('Error getting user profile:', error);
-    throw error;
-  }
+export const getUsers = async (): Promise<UserProfile[]> => {
+  const { data, error } = await supabase.from('profiles').select('*').order('email', { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map(mapUserRow);
+};
+
+export const getUserByEmail = async (email: string): Promise<UserProfile | null> => {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('email', normalizeEmail(email))
+    .maybeSingle();
+  if (error) throw error;
+  return data ? mapUserRow(data) : null;
 };
 
 export const updateUserRole = async (uid: string, role: 'driver' | 'manager' | 'admin') => {
-  try {
-    const userDocRef = doc(db, 'users', uid);
-    await updateDoc(userDocRef, {role});
-  } catch (error) {
-    console.error('Error updating user role:', error);
-    throw error;
-  }
+  const { error } = await supabase.from('profiles').update({ role }).eq('id', uid);
+  if (error) throw error;
 };
 
 export const isManager = async (uid: string): Promise<boolean> => {
   try {
     const profile = await getUserProfile(uid);
-    console.log('📋 Manager check for', uid, ':', profile);
     return profile?.role === 'manager' || profile?.role === 'admin';
-  } catch (error) {
-    console.error('Error checking manager status:', error);
+  } catch {
     return false;
   }
 };
@@ -85,57 +71,41 @@ export const isAdmin = async (uid: string): Promise<boolean> => {
   try {
     const profile = await getUserProfile(uid);
     return profile?.role === 'admin';
-  } catch (error) {
-    console.error('Error checking admin status:', error);
+  } catch {
     return false;
   }
 };
 
-// Convert image file to base64 data URL
 export const convertImageToBase64 = async (imageUri: string): Promise<string> => {
   try {
-    // If it's already a data URI, return as is
-    if (imageUri.startsWith('data:')) {
+    if (!imageUri || imageUri.startsWith('data:') || imageUri.startsWith('http')) {
       return imageUri;
     }
 
-    // Read file and convert to base64 using the Expo SDK 54 File API.
     const imageFile = new File(imageUri);
     const base64 = await imageFile.base64();
-
-    // Determine image type
     const imageType = imageUri.toLowerCase().endsWith('.png') ? 'png' : 'jpeg';
-
     return `data:image/${imageType};base64,${base64}`;
-  } catch (error) {
-    console.error('Error converting image to base64:', error);
-    // Return original URI if conversion fails
+  } catch {
     return imageUri;
   }
 };
 
-const deleteDocsInBatches = async (docsToDelete: Array<{ref: any}>) => {
-  const BATCH_LIMIT = 450;
-  for (let i = 0; i < docsToDelete.length; i += BATCH_LIMIT) {
-    const batch = writeBatch(db);
-    const slice = docsToDelete.slice(i, i + BATCH_LIMIT);
-    slice.forEach((d) => batch.delete(d.ref));
-    await batch.commit();
-  }
-};
-
 export const deleteUserAccountData = async (uid: string) => {
-  const tripsRef = collection(db, 'trips');
+  const driversList = await getDrivers(uid);
+  const driverIds = driversList.map(d => d.id);
 
-  const [tripsSnap, driversList] = await Promise.all([
-    getDocs(query(tripsRef, where('userId', '==', uid))),
-    getDrivers(uid)
+  const results = await Promise.all([
+    supabase.from('notifications').delete().eq('driver_user_id', uid),
+    supabase.from('driver_locations').delete().eq('user_id', uid),
+    supabase.from('trips').delete().or(`user_id.eq.${uid},driver_user_id.eq.${uid}`),
+    driverIds.length
+      ? supabase.from('drivers').delete().in('id', driverIds)
+      : Promise.resolve({ error: null }),
   ]);
+  const failed = results.find(result => result.error);
+  if (failed?.error) throw failed.error;
 
-  const driverRefs = driversList.map(d => ({ref: doc(db, 'drivers', d.id)}));
-
-  await deleteDocsInBatches(tripsSnap.docs);
-  await deleteDocsInBatches(driverRefs);
-
-  await deleteDoc(doc(usersRef, uid));
+  const { error } = await supabase.from('profiles').delete().eq('id', uid);
+  if (error) throw error;
 };

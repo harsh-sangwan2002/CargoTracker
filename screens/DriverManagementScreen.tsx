@@ -17,10 +17,11 @@ import {
   PanResponder,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as Clipboard from 'expo-clipboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-import { auth } from '../firebaseConfig';
-import { getDrivers, addDriver, updateDriver, deleteDriver, Driver } from '../services/driverService';
+import { auth } from '../supabaseConfig';
+import { getDrivers, addDriver, updateDriver, deleteDriver, createDriverAccount, getDriverByEmail, Driver } from '../services/driverService';
 import { convertImageToBase64 } from '../services/userService';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
 import { ShimmerRow } from '../components/Shimmer';
@@ -34,9 +35,11 @@ type DriverFormValues = {
   vehicleOwned: string;
   photoUrl: string;
   email: string;
+  licenseNumber: string;
+  licenseExpiry: string;
 };
 
-const emptyForm: DriverFormValues = { fullName: '', age: '', address: '', aadhaarCard: '', panCard: '', vehicleOwned: '', photoUrl: '', email: '' };
+const emptyForm: DriverFormValues = { fullName: '', age: '', address: '', aadhaarCard: '', panCard: '', vehicleOwned: '', photoUrl: '', email: '', licenseNumber: '', licenseExpiry: '' };
 
 interface DriverFormProps {
   f: DriverFormValues;
@@ -53,7 +56,7 @@ function DriverForm({ f, setF, onSave, onCancel, submitLabel, saving, onPickImag
     <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
       <TouchableOpacity style={fms.photoBtn} onPress={() => onPickImage(submitLabel === 'Save Changes')} activeOpacity={0.8}>
         {f.photoUrl ? (
-          <Image source={{ uri: f.photoUrl }} style={fms.photoImg} />
+          <Image source={{ uri: f.photoUrl }} style={fms.photoImg} resizeMode="cover" />
         ) : (
           <View style={fms.photoPlaceholder}>
             <Text style={fms.photoPlaceholderIcon}>📷</Text>
@@ -69,6 +72,8 @@ function DriverForm({ f, setF, onSave, onCancel, submitLabel, saving, onPickImag
         { key: 'vehicleOwned', label: 'Vehicle *', autoCapitalize: 'characters' as const, placeholder: 'HR26AB1234' },
         { key: 'aadhaarCard', label: 'Aadhaar * (12 digits)', keyboardType: 'numeric' as const, maxLength: 12, placeholder: '123456789012' },
         { key: 'panCard', label: 'PAN Card *', autoCapitalize: 'characters' as const, maxLength: 10, placeholder: 'ABCDE1234F' },
+        { key: 'licenseNumber', label: 'License Number (optional)', autoCapitalize: 'characters' as const, placeholder: 'DL-1420110012345' },
+        { key: 'licenseExpiry', label: 'License Expiry (optional, YYYY-MM-DD)', placeholder: '2027-01-31' },
       ].map(field => (
         <View key={field.key} style={{ marginBottom: Spacing[3] }}>
           <Text style={fms.label}>{field.label}</Text>
@@ -122,8 +127,10 @@ export default function DriverManagementScreen() {
   const [selected, setSelected] = useState<(Driver & { id: string }) | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [creatingLogin, setCreatingLogin] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [editForm, setEditForm] = useState(emptyForm);
+  const [credentialsModal, setCredentialsModal] = useState<{ email: string; password?: string; linkedExisting?: boolean } | null>(null);
 
   const addSwipeY = useRef(new Animated.Value(0)).current;
   const addModalPan = useRef(PanResponder.create({
@@ -209,6 +216,7 @@ export default function DriverManagementScreen() {
     if (!/^\d{12}$/.test(f.aadhaarCard.replace(/\s/g, ''))) return 'Aadhaar must be exactly 12 digits.';
     if (!/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(f.panCard.toUpperCase())) return 'Invalid PAN card format (e.g. ABCDE1234F).';
     if (f.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email.trim())) return 'Invalid email address.';
+    if (f.licenseExpiry.trim() && !/^\d{4}-\d{2}-\d{2}$/.test(f.licenseExpiry.trim())) return 'License expiry must be in YYYY-MM-DD format.';
     return null;
   };
 
@@ -217,6 +225,8 @@ export default function DriverManagementScreen() {
     if (err) { Alert.alert('Validation Error', err); return; }
     setSaving(true);
     try {
+      const email = form.email.trim().toLowerCase();
+      const existing = email ? await getDriverByEmail(email) : null;
       await addDriver({
         fullName: form.fullName.trim(),
         age: parseInt(form.age),
@@ -225,10 +235,17 @@ export default function DriverManagementScreen() {
         panCard: form.panCard.trim().toUpperCase(),
         vehicleOwned: form.vehicleOwned.trim().toUpperCase(),
         photoUrl: form.photoUrl,
-        email: form.email.trim().toLowerCase(),
+        email,
         userId: '',
+        licenseNumber: form.licenseNumber.trim(),
+        licenseExpiry: form.licenseExpiry.trim(),
       });
-      Alert.alert('Success', 'Driver added successfully.');
+      Alert.alert(
+        'Success',
+        existing
+          ? 'A driver with this email already existed — their record was synced with the details you entered.'
+          : 'Driver added successfully.'
+      );
       setAddModal(false);
       setForm(emptyForm);
       load();
@@ -254,6 +271,8 @@ export default function DriverManagementScreen() {
         vehicleOwned: editForm.vehicleOwned.trim().toUpperCase(),
         photoUrl: editForm.photoUrl || selected.photoUrl,
         email: editForm.email.trim().toLowerCase(),
+        licenseNumber: editForm.licenseNumber.trim(),
+        licenseExpiry: editForm.licenseExpiry.trim(),
       });
       setIsEditing(false);
       setViewModal(false);
@@ -264,6 +283,32 @@ export default function DriverManagementScreen() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleCreateLogin = () => {
+    if (!selected) return;
+    if (!selected.email) {
+      Alert.alert('Email required', 'Add an email address to this driver before creating a login.');
+      return;
+    }
+    Alert.alert('Create Login', `Create or link a login for ${selected.fullName} (${selected.email})?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Create',
+        onPress: async () => {
+          setCreatingLogin(true);
+          try {
+            const result = await createDriverAccount(selected.id, selected.email!, selected.fullName);
+            setCredentialsModal({ email: result.email, password: result.tempPassword, linkedExisting: result.linkedExisting });
+            load();
+          } catch (e: any) {
+            Alert.alert('Error', e?.message ?? 'Failed to create login.');
+          } finally {
+            setCreatingLogin(false);
+          }
+        },
+      },
+    ]);
   };
 
   const handleDelete = () => {
@@ -279,8 +324,8 @@ export default function DriverManagementScreen() {
             setViewModal(false);
             setSelected(null);
             load();
-          } catch {
-            Alert.alert('Error', 'Failed to delete driver.');
+          } catch (e: any) {
+            Alert.alert('Error', e?.message ?? 'Failed to delete driver.');
           }
         },
       },
@@ -334,8 +379,8 @@ export default function DriverManagementScreen() {
               onPress={() => { setSelected(item); setIsEditing(false); setViewModal(true); }}
               activeOpacity={0.85}
             >
-              {item.photoUrl?.startsWith('data:') ? (
-                <Image source={{ uri: item.photoUrl }} style={s.avatar} />
+              {item.photoUrl ? (
+                <Image source={{ uri: item.photoUrl }} style={s.avatar} resizeMode="cover" />
               ) : (
                 <View style={[s.avatar, s.avatarPlaceholder]}>
                   <Text style={s.avatarInitial}>{item.fullName[0]?.toUpperCase()}</Text>
@@ -363,8 +408,10 @@ export default function DriverManagementScreen() {
       <Modal visible={addModal} transparent animationType="slide" onRequestClose={() => setAddModal(false)}>
         <KeyboardAvoidingView style={m.overlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <Animated.View style={[m.sheet, { transform: [{ translateY: addSwipeY }] }]}>
-            <View style={m.handle} {...addModalPan.panHandlers} hitSlop={{ top: 10, bottom: 20, left: 100, right: 100 }} />
-            <Text style={m.title}>Add Driver</Text>
+            <View style={m.dragHeader} {...addModalPan.panHandlers}>
+              <View style={m.handle} />
+              <Text style={m.title}>Add Driver</Text>
+            </View>
             <DriverForm
               f={form}
               setF={setField}
@@ -382,8 +429,10 @@ export default function DriverManagementScreen() {
       <Modal visible={viewModal} transparent animationType="slide" onRequestClose={() => { setViewModal(false); setIsEditing(false); }}>
         <KeyboardAvoidingView style={m.overlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <Animated.View style={[m.sheet, { transform: [{ translateY: viewSwipeY }] }]}>
-            <View style={m.handle} {...viewModalPan.panHandlers} hitSlop={{ top: 10, bottom: 20, left: 100, right: 100 }} />
-            <Text style={m.title}>{isEditing ? 'Edit Driver' : 'Driver Details'}</Text>
+            <View style={m.dragHeader} {...viewModalPan.panHandlers}>
+              <View style={m.handle} />
+              <Text style={m.title}>{isEditing ? 'Edit Driver' : 'Driver Details'}</Text>
+            </View>
 
             {isEditing ? (
               <DriverForm
@@ -397,8 +446,8 @@ export default function DriverManagementScreen() {
               />
             ) : (
               <ScrollView showsVerticalScrollIndicator={false}>
-                {selected?.photoUrl?.startsWith('data:') ? (
-                  <Image source={{ uri: selected.photoUrl }} style={dv.photo} />
+                {selected?.photoUrl ? (
+                  <Image source={{ uri: selected.photoUrl }} style={dv.photo} resizeMode="cover" />
                 ) : (
                   <View style={[dv.photo, dv.photoPlaceholder]}>
                     <Text style={dv.photoInitial}>{selected?.fullName[0]?.toUpperCase()}</Text>
@@ -411,6 +460,8 @@ export default function DriverManagementScreen() {
                   { label: 'Address', value: selected?.address },
                   { label: 'Aadhaar', value: selected?.aadhaarCard },
                   { label: 'PAN Card', value: selected?.panCard },
+                  { label: 'License No.', value: selected?.licenseNumber },
+                  { label: 'License Expiry', value: selected?.licenseExpiry },
                   { label: 'Email', value: (selected as any)?.email || '—' },
                 ].map(row => (
                   <View key={row.label} style={dv.row}>
@@ -426,8 +477,18 @@ export default function DriverManagementScreen() {
                     </Text>
                   </View>
                 </View>
+                {!selected?.userId && (
+                  <TouchableOpacity
+                    style={[dv.editBtn, { backgroundColor: Colors.success, marginBottom: Spacing[3] }]}
+                    onPress={handleCreateLogin}
+                    disabled={creatingLogin}
+                    activeOpacity={0.85}
+                  >
+                    {creatingLogin ? <ActivityIndicator color="#fff" size="small" /> : <Text style={dv.editBtnText}>Create Login</Text>}
+                  </TouchableOpacity>
+                )}
                 <View style={dv.btns}>
-                  <TouchableOpacity style={dv.editBtn} onPress={() => { setEditForm({ fullName: selected!.fullName, age: selected!.age.toString(), address: selected!.address, aadhaarCard: selected!.aadhaarCard, panCard: selected!.panCard, vehicleOwned: selected!.vehicleOwned ?? '', photoUrl: selected!.photoUrl, email: (selected as any).email ?? '' }); setIsEditing(true); }} activeOpacity={0.85}>
+                  <TouchableOpacity style={dv.editBtn} onPress={() => { setEditForm({ fullName: selected!.fullName, age: selected!.age.toString(), address: selected!.address, aadhaarCard: selected!.aadhaarCard, panCard: selected!.panCard, vehicleOwned: selected!.vehicleOwned ?? '', photoUrl: selected!.photoUrl, email: (selected as any).email ?? '', licenseNumber: selected!.licenseNumber ?? '', licenseExpiry: selected!.licenseExpiry ?? '' }); setIsEditing(true); }} activeOpacity={0.85}>
                     <Text style={dv.editBtnText}>Edit</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={dv.deleteBtn} onPress={handleDelete} activeOpacity={0.85}>
@@ -441,6 +502,43 @@ export default function DriverManagementScreen() {
             )}
           </Animated.View>
         </KeyboardAvoidingView>
+      </Modal>
+
+      <Modal visible={!!credentialsModal} transparent animationType="fade" onRequestClose={() => setCredentialsModal(null)}>
+        <View style={m.overlay}>
+          <View style={dv.credCard}>
+            <Text style={dv.credTitle}>{credentialsModal?.linkedExisting ? 'Account Linked' : 'Login Created'}</Text>
+            <Text style={dv.credBody}>
+              {credentialsModal?.linkedExisting
+                ? 'This email already had an account — the driver record and their existing trips have been synced to it. They can sign in with their existing password.'
+                : 'Share these credentials with the driver securely. They should change the password after first login.'}
+            </Text>
+
+            <Text style={dv.credLabel}>Email</Text>
+            <TextInput style={dv.credValue} value={credentialsModal?.email ?? ''} editable={false} selectTextOnFocus />
+
+            {!!credentialsModal?.password && (
+              <>
+                <Text style={dv.credLabel}>Temporary Password</Text>
+                <TextInput style={dv.credValue} value={credentialsModal.password} editable={false} selectTextOnFocus />
+                <TouchableOpacity
+                  style={dv.copyBtn}
+                  activeOpacity={0.85}
+                  onPress={async () => {
+                    await Clipboard.setStringAsync(credentialsModal.password!);
+                    Alert.alert('Copied', 'Password copied to clipboard.');
+                  }}
+                >
+                  <Text style={dv.copyBtnText}>Copy Password</Text>
+                </TouchableOpacity>
+              </>
+            )}
+
+            <TouchableOpacity style={dv.closeBtn} activeOpacity={0.85} onPress={() => setCredentialsModal(null)}>
+              <Text style={dv.closeBtnText}>Done</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -468,7 +566,7 @@ const s = {
   backBtnText: { fontSize: 28, color: Colors.primary, fontWeight: '700' as const, lineHeight: 32 },
   pageTitle: { fontSize: FontSize['2xl'], fontWeight: '800' as const, color: Colors.text },
   addBtn: {
-    backgroundColor: Colors.success,
+    backgroundColor: Colors.primary,
     paddingHorizontal: Spacing[4],
     paddingVertical: Spacing[2],
     borderRadius: Radius.md,
@@ -530,15 +628,20 @@ const m = {
     padding: Spacing[5],
     maxHeight: '90%' as const,
   },
+  dragHeader: {
+    alignItems: 'center' as const,
+    paddingTop: Spacing[1],
+    paddingBottom: Spacing[3],
+  },
   handle: {
     width: 40,
     height: 4,
     backgroundColor: Colors.border,
     borderRadius: 2,
     alignSelf: 'center' as const,
-    marginBottom: Spacing[4],
+    marginBottom: Spacing[3],
   },
-  title: { fontSize: FontSize.xl, fontWeight: '800' as const, color: Colors.text, marginBottom: Spacing[4] },
+  title: { fontSize: FontSize.xl, fontWeight: '800' as const, color: Colors.text },
 };
 
 const fms = {
@@ -580,7 +683,7 @@ const fms = {
   cancelText: { color: Colors.textSecondary, fontWeight: '600' as const, fontSize: FontSize.base },
   saveBtn: {
     flex: 1,
-    backgroundColor: Colors.success,
+    backgroundColor: Colors.primary,
     borderRadius: Radius.md,
     paddingVertical: 14,
     alignItems: 'center' as const,
@@ -590,6 +693,36 @@ const fms = {
 };
 
 const dv = {
+  credCard: {
+    width: '100%' as const,
+    maxWidth: 420,
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.lg,
+    padding: Spacing[5],
+  },
+  credTitle: { fontSize: FontSize.lg, fontWeight: '800' as const, color: Colors.text, marginBottom: Spacing[2] },
+  credBody: { fontSize: FontSize.sm, color: Colors.textSecondary, marginBottom: Spacing[4] },
+  credLabel: { fontSize: FontSize.xs, fontWeight: '600' as const, color: Colors.textSecondary, marginBottom: 4 },
+  credValue: {
+    fontSize: FontSize.base,
+    fontWeight: '700' as const,
+    color: Colors.text,
+    backgroundColor: Colors.surfaceAlt,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: Spacing[3],
+  },
+  copyBtn: {
+    backgroundColor: Colors.primary,
+    borderRadius: Radius.md,
+    paddingVertical: 12,
+    alignItems: 'center' as const,
+    marginBottom: Spacing[3],
+  },
+  copyBtnText: { color: '#fff', fontWeight: '700' as const, fontSize: FontSize.base },
   photo: { width: '100%' as const, height: 200, borderRadius: Radius.lg, marginBottom: Spacing[4] },
   photoPlaceholder: {
     backgroundColor: Colors.primaryLight,

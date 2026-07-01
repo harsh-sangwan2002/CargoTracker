@@ -11,9 +11,8 @@ import {
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { signInWithEmailAndPassword } from 'firebase/auth';
 import { useNavigation } from '@react-navigation/native';
-import { auth } from '../firebaseConfig';
+import { signInWithEmailAndPassword } from '../supabaseConfig';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
 
 export default function LoginScreen() {
@@ -31,14 +30,11 @@ export default function LoginScreen() {
     }
     setLoading(true);
     try {
-      await signInWithEmailAndPassword(auth, email.trim(), password);
+      await signInWithEmailAndPassword(email.trim(), password);
     } catch (err: any) {
       const map: Record<string, string> = {
-        'auth/user-not-found': 'No account found with this email.',
-        'auth/wrong-password': 'Incorrect password.',
-        'auth/invalid-email': 'Please enter a valid email address.',
-        'auth/invalid-credential': 'Invalid email or password.',
-        'auth/too-many-requests': 'Too many attempts. Try again later.',
+        'invalid_credentials': 'Invalid email or password.',
+        'email_not_confirmed': 'Please confirm your email before signing in.',
       };
       Alert.alert('Login Failed', map[err.code] ?? err.message ?? 'Something went wrong.');
     } finally {

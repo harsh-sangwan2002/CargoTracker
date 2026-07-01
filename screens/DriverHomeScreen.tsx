@@ -5,10 +5,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
-import { auth } from '../firebaseConfig';
-import { getTripsByUser, startTrip, endTrip, TripFirestore } from '../services/tripService';
+import NetInfo from '@react-native-community/netinfo';
+import { auth } from '../supabaseConfig';
+import { getTripsByUser, subscribeToDriverTrips, startTrip, endTrip, TripRecord } from '../services/tripService';
+import { registerOfflineHandler, enqueueOfflineOp } from '../utils/offlineQueue';
 import { updateDriverLocation, clearDriverTracking } from '../services/locationService';
-import { getDriverNotifications, markAllNotificationsRead, AppNotification } from '../services/notificationService';
+import { getDriverNotifications, subscribeToDriverNotifications, markAllNotificationsRead, AppNotification } from '../services/notificationService';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
 import { ShimmerStatsRow, ShimmerList } from '../components/Shimmer';
 import type { TabId } from './MainTabsScreen';
@@ -18,7 +20,7 @@ interface Props {
   onNavigateToTrip: (tripId: string) => void;
 }
 
-type Trip = TripFirestore & { id: string };
+type Trip = TripRecord & { id: string };
 
 export default function DriverHomeScreen({ onTabPress, onNavigateToTrip }: Props) {
   const user = auth.currentUser;
@@ -55,9 +57,20 @@ export default function DriverHomeScreen({ onTabPress, onNavigateToTrip }: Props
   };
 
   useEffect(() => {
+    registerOfflineHandler('startTrip', async (payload) => { await startTrip(payload.tripId); });
+    registerOfflineHandler('endTrip', async (payload) => { await endTrip(payload.tripId); });
+  }, []);
+
+  useEffect(() => {
     load();
     loadNotifications();
+
+    const unsubTrips = user?.uid ? subscribeToDriverTrips(user.uid, setTrips) : undefined;
+    const unsubNotifs = user?.uid ? subscribeToDriverNotifications(user.uid, setNotifications) : undefined;
+
     return () => {
+      unsubTrips?.();
+      unsubNotifs?.();
       locationWatcher.current?.remove();
       if (user) clearDriverTracking(user.uid).catch(() => {});
     };
@@ -118,9 +131,17 @@ export default function DriverHomeScreen({ onTabPress, onNavigateToTrip }: Props
           onPress: async () => {
             setActionLoading(trip.id);
             try {
-              await startTrip(trip.id);
-              await load();
-              // Auto-start GPS when trip begins
+              const net = await NetInfo.fetch();
+              const online = net.isConnected && net.isInternetReachable !== false;
+              if (!online) {
+                await enqueueOfflineOp('startTrip', { tripId: trip.id });
+                setTrips(prev => prev.map(t => (t.id === trip.id ? { ...t, status: 'active' } : t)));
+                Alert.alert('Offline', 'No connection — this will sync automatically once you\'re back online.');
+              } else {
+                await startTrip(trip.id);
+                await load();
+              }
+              // Auto-start GPS when trip begins (works offline too — location is queued server-side)
               const updated = { ...trip, departureTime: new Date() };
               await startGPS(updated);
             } catch {
@@ -146,9 +167,18 @@ export default function DriverHomeScreen({ onTabPress, onNavigateToTrip }: Props
           onPress: async () => {
             setActionLoading(trip.id);
             try {
-              await endTrip(trip.id);
-              stopGPS();
-              await load();
+              const net = await NetInfo.fetch();
+              const online = net.isConnected && net.isInternetReachable !== false;
+              if (!online) {
+                await enqueueOfflineOp('endTrip', { tripId: trip.id });
+                setTrips(prev => prev.map(t => (t.id === trip.id ? { ...t, arrivalTime: new Date() } : t)));
+                stopGPS();
+                Alert.alert('Offline', 'No connection — this will sync automatically once you\'re back online.');
+              } else {
+                await endTrip(trip.id);
+                stopGPS();
+                await load();
+              }
             } catch {
               Alert.alert('Error', 'Could not end trip. Try again.');
             } finally {

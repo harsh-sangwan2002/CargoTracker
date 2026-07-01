@@ -1,294 +1,114 @@
-# 🚚 Cargo Tracker – Truck Fleet Management App
+# Cargo Tracker
 
-A complete **React Native + Expo** mobile application for managing truck fleets with **real-time trip management**, **fuel tracking**, and **live location monitoring**.
-Built using **Firebase (Authentication + Firestore)** with a scalable, production-ready architecture.
+Cargo Tracker is an Expo React Native app for fleet trip management, driver assignment, plant management, analytics, and live driver location tracking.
 
----
+## Current Stack
 
-## ✨ Features
+- React Native + Expo SDK 54
+- TypeScript
+- Supabase Auth
+- Supabase Postgres
+- Supabase Realtime for active driver locations
+- AsyncStorage for local session/cache persistence
+- `react-native-maps` and `expo-location` for live tracking
 
-- **User Authentication** – Secure login & logout using Firebase Auth
-- **Manager Dashboard** – Overview of trucks, active trips, drivers, and pending loads
-- **Trip Management** – Create, track, and update trips with timestamps
-- **Fuel Tracking** – Log fuel refills during trips
-- **Unload Entry** – Mark trips completed with arrival time
-- **Recent Trips Feed** – Activity-style recent trip updates
-- **Live Location (Optional)** – Real-time truck tracking using Firebase + device GPS
-- **Responsive UI** – Clean and modern mobile-first design
-- **Cross Platform** – Android & iOS using Expo
+## Setup
 
----
-
-## 🛠 Tech Stack
-
-### Frontend
-
-- **React Native**
-- **Expo**
-- **TypeScript**
-- **React Navigation**
-- **NativeWind / Custom Styles**
-
-### Backend
-
-- **Firebase Authentication**
-- **Firebase Firestore**
-- **Firebase Realtime / Cloud Functions (optional)**
-
-### Utilities
-
-- Expo Location (for GPS)
-- Firebase SDK
-- Secure environment variables
-
----
-
-## 📦 Prerequisites
-
-- Node.js (v16+)
-- npm or yarn
-- Firebase account (free tier)
-- Expo Go app (for testing)
-
----
-
-## ⚙️ Installation
-
-### 1️⃣ Clone the Repository
-
-```bash
-git clone https://github.com/your-username/cargo-tracker.git
-cd cargo-tracker
-```
-
-### 2️⃣ Install Dependencies
+Install dependencies:
 
 ```bash
 npm install
 ```
 
-If needed:
+Create a local `.env` file from `.env.example`:
 
 ```bash
-npm install --force
+cp .env.example .env
 ```
 
----
+Required environment variables:
 
-## 🔥 Firebase Setup
-
-### 3️⃣ Create Firebase Project
-
-1. Go to 👉 [https://console.firebase.google.com](https://console.firebase.google.com)
-2. Create a new project
-3. Enable **Authentication**
-
-   - Sign-in method: **Email / Password**
-
-4. Enable **Firestore Database**
-
----
-
-### 4️⃣ Firebase Configuration
-
-Create `firebaseConfig.ts`:
-
-```ts
-import { initializeApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
-
-const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT.appspot.com",
-  messagingSenderId: "SENDER_ID",
-  appId: "APP_ID",
-};
-
-const app = initializeApp(firebaseConfig);
-
-export const auth = getAuth(app);
-export const db = getFirestore(app);
+```bash
+SUPABASE_DATABASE_URL=postgresql://postgres.<project-ref>:<password>@<pooler-host>:6543/postgres
+EXPO_PUBLIC_SUPABASE_URL=https://<project-ref>.supabase.co
+EXPO_PUBLIC_SUPABASE_ANON_KEY=<your-supabase-anon-key>
 ```
 
-⚠️ **Do NOT commit this file** (already covered in `.gitignore`)
+The Postgres connection string is only for local schema migration scripts. Do not import it into app code. The Expo app uses only the Supabase URL and anon key.
 
----
+Apply the database schema:
 
-## 🧱 Firestore Data Structure
-
-### 🔹 trucks (collection)
-
-```json
-{
-  "truckNo": "TRK-101",
-  "bidNo": "BID-001",
-  "createdAt": "timestamp"
-}
+```bash
+npm run supabase:migrate
 ```
 
----
-
-### 🔹 trips (collection)
-
-```json
-{
-  "truckNo": "TRK-101",
-  "bidNo": "BID-001",
-  "quantity": 25,
-  "departureTime": "timestamp",
-  "arrivalTime": "timestamp | null",
-  "fuelFilled": 120,
-  "status": "ongoing | completed",
-  "createdAt": "timestamp"
-}
-```
-
----
-
-### 🔹 liveLocations (optional – collection)
-
-```json
-{
-  "truckNo": "TRK-101",
-  "latitude": 28.6139,
-  "longitude": 77.209,
-  "updatedAt": "timestamp"
-}
-```
-
----
-
-## ▶️ Running the App
-
-### Start Expo Server
+Start the app:
 
 ```bash
 npm start
 ```
 
-### Android
+Run type checking:
 
 ```bash
-npm run android
+npx tsc --noEmit
 ```
 
-### iOS
+## Main Features
+
+- Email/password auth through Supabase Auth
+- Driver, manager, and admin roles
+- Driver home screen with assigned trips, notifications, and GPS tracking
+- Manager/admin dashboard with overview stats and recent trips
+- Trip list with search, status filters, add/edit/delete modals, date pickers, and driver/plant selectors
+- Driver management with photo capture/gallery upload, profile validation, and account-linking email
+- Plant management with default seed plants
+- User role management
+- Analytics with date ranges and driver filtering
+- Live driver map backed by realtime `driver_locations` updates
+
+## Project Structure
+
+```text
+App.tsx
+supabaseConfig.ts
+screens/
+services/
+utils/
+components/
+supabase/schema.sql
+scripts/run-supabase-schema.js
+```
+
+## Supabase Notes
+
+The schema is defined in `supabase/schema.sql` (idempotent — safe to re-run via `npm run supabase:migrate`).
+
+Core tables:
+
+- `profiles` (renamed from `users`; 1:1 with `auth.users`)
+- `drivers` (now links to `profiles` via `profile_id`)
+- `vehicles`
+- `trips` (now references `vehicles`, `drivers`, and `plants` via foreign keys, alongside the legacy free-text columns kept for this release)
+- `plants`
+- `driver_locations`
+- `notifications`
+
+Row Level Security is enabled on `profiles`, `drivers`, `vehicles`, `plants`, and `trips` via a `current_user_role()` helper (see `supabase/schema.sql`). Verify each role's access manually before relying on it as the sole security boundary.
+
+### Admin driver login provisioning
+
+Creating a Supabase Auth account for a driver (so the service-role key never touches the client) is handled by the `create-driver-user` Edge Function in `supabase/functions/create-driver-user`. Deploy it with:
 
 ```bash
-npm run ios
+supabase functions deploy create-driver-user
+supabase secrets set SUPABASE_URL=https://<project-ref>.supabase.co SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
 ```
 
-Or simply scan the QR code using **Expo Go** 📱
+The Admin's "Create Login" action on a driver's detail screen calls this function; it only succeeds for callers whose `profiles.role` is `admin`.
 
----
+## Troubleshooting
 
-## 📂 Project Structure
+### Email rate limit exceeded on signup
 
-```
-CargoTracker/
-├── App.tsx
-├── firebaseConfig.ts        # Firebase setup (ignored in git)
-├── screens/
-│   ├── LoginScreen.tsx
-│   ├── DashboardScreen.tsx
-│   ├── AddTripScreen.tsx
-│   ├── TripsListScreen.tsx
-│   └── LiveMapScreen.tsx
-├── utils/
-├── assets/
-├── package.json
-├── tsconfig.json
-├── app.json
-└── README.md
-```
-
----
-
-## 🔐 Authentication Flow
-
-1. User logs in using Email & Password
-2. Firebase Auth manages session
-3. `auth.currentUser` used for protected routes
-4. Logout clears session instantly
-
----
-
-## 📍 Live Location Tracking (Optional)
-
-- Use `expo-location` to get GPS
-- Update Firestore every 10–30 seconds
-- Subscribe using `onSnapshot()` for real-time updates
-
-```ts
-onSnapshot(collection(db, "liveLocations"), (snapshot) => {
-  snapshot.docs.forEach((doc) => console.log(doc.data()));
-});
-```
-
----
-
-## 🧪 Common Issues & Fixes
-
-### App crashes on start
-
-```bash
-expo start -c
-```
-
-### Firebase auth not working
-
-- Check Email/Password enabled
-- Verify Firebase config values
-- Restart Metro bundler
-
-### Firestore permission error
-
-For testing:
-
-```js
-allow read, write: if true;
-```
-
-(Use proper rules in production)
-
----
-
-## 🔒 Security Best Practices
-
-- Never commit Firebase keys
-- Use Firestore Rules
-- Validate all inputs
-- Restrict write access per user
-- Enable App Check (optional)
-
----
-
-## 🚀 Future Enhancements
-
-- Driver vs Manager roles
-- Push notifications (Firebase Cloud Messaging)
-- Offline sync
-- Trip analytics dashboard
-- PDF / Excel export
-- Fuel cost calculations
-- Background location tracking
-
----
-
-## 📜 License
-
-MIT License – Free to use and modify
-
----
-
-## 🤝 Support
-
-If you face issues:
-
-1. Check Metro logs
-2. Verify Firebase setup
-3. Clear Expo cache
-4. Test Firestore rules
+Supabase's built-in email provider is rate-limited. For local development, disable email confirmation in Supabase Dashboard under Authentication settings, or configure a custom SMTP provider for higher email limits.

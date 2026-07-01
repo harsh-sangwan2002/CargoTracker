@@ -19,12 +19,16 @@ import {
   TouchableWithoutFeedback,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import NetInfo from '@react-native-community/netinfo';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { auth } from '../firebaseConfig';
-import { getTrips, getTripsByUser, addTrip, updateTrip, deleteTrip, TripFirestore } from '../services/tripService';
+import { auth } from '../supabaseConfig';
+import { getTrips, getTripsByUser, subscribeToDriverTrips, addTrip, updateTrip, deleteTrip, TripRecord } from '../services/tripService';
 import { getDrivers, Driver } from '../services/driverService';
 import { addNotification } from '../services/notificationService';
 import { getPlants, seedDefaultPlantsIfEmpty, Plant } from '../services/plantService';
+import { getVehicles, Vehicle } from '../services/vehicleService';
+import { getFuelLogsByTrip, addFuelLog, FuelLog } from '../services/fuelService';
+import { registerOfflineHandler, enqueueOfflineOp } from '../utils/offlineQueue';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
 import { ShimmerList } from '../components/Shimmer';
 import type { UserRole } from './MainTabsScreen';
@@ -95,13 +99,18 @@ function DropdownInput({ label, value, onChangeText, suggestions, onSelect, plac
   );
 }
 
+const maskAadhaar = (aadhaar?: string) => {
+  const digits = (aadhaar ?? '').replace(/\D/g, '');
+  return digits.length >= 4 ? `•••• •••• ${digits.slice(-4)}` : '';
+};
+
 /* ─── Driver dropdown (shows name + vehicle) ─────────────────────── */
 interface DriverDropProps {
   label: string;
   value: string;
   onChangeText: (t: string) => void;
   drivers: (Driver & { id: string })[];
-  onSelect: (name: string, userId: string) => void;
+  onSelect: (name: string, userId: string, driverId: string) => void;
   zIndex?: number;
 }
 function DriverDropdown({ label, value, onChangeText, drivers, onSelect, zIndex = 50 }: DriverDropProps) {
@@ -126,16 +135,20 @@ function DriverDropdown({ label, value, onChangeText, drivers, onSelect, zIndex 
       {open && filtered.length > 0 && (
         <View style={inp.dropdown}>
           <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled" style={{ maxHeight: 160 }}>
-            {filtered.map((d, i) => (
-              <TouchableOpacity
-                key={d.id}
-                style={[inp.item, i === filtered.length - 1 && { borderBottomWidth: 0 }]}
-                onPress={() => { onSelect(d.fullName, d.userId); onChangeText(d.fullName); setOpen(false); }}
-              >
-                <Text style={inp.itemText}>{d.fullName}</Text>
-                {d.vehicleOwned ? <Text style={inp.itemSub}>{d.vehicleOwned}</Text> : null}
-              </TouchableOpacity>
-            ))}
+            {filtered.map((d, i) => {
+              const aadhaar = maskAadhaar(d.aadhaarCard);
+              const sub = [aadhaar ? `Aadhaar ${aadhaar}` : null, d.vehicleOwned || null].filter(Boolean).join(' · ');
+              return (
+                <TouchableOpacity
+                  key={d.id}
+                  style={[inp.item, i === filtered.length - 1 && { borderBottomWidth: 0 }]}
+                  onPress={() => { onSelect(d.fullName, d.userId, d.id); onChangeText(d.fullName); setOpen(false); }}
+                >
+                  <Text style={inp.itemText}>{d.fullName}</Text>
+                  {sub ? <Text style={inp.itemSub}>{sub}</Text> : null}
+                </TouchableOpacity>
+              );
+            })}
           </ScrollView>
         </View>
       )}
@@ -163,38 +176,51 @@ function DateBtn({ label, value, onPress }: DateBtnProps) {
 /* ─── Trip Form ──────────────────────────────────────────────────── */
 interface FormState {
   vehicleNo: string;
+  vehicleId: string;
   lrNo: string;
   driverName: string;
   driverUserId: string;
+  driverId: string;
   companyName: string;
   itemType: string;
   quantity: string;
   fuelFilled: string;
   distanceTravelled: string;
   fromPlant: string;
+  fromPlantId: string;
   toPlant: string;
+  toPlantId: string;
+  odometerStart: string;
+  odometerEnd: string;
   departureTime: Date | null;
   arrivalTime: Date | null;
 }
 
 const emptyForm = (): FormState => ({
-  vehicleNo: '', lrNo: '', driverName: '', driverUserId: '', companyName: '',
+  vehicleNo: '', vehicleId: '', lrNo: '', driverName: '', driverUserId: '', driverId: '', companyName: '',
   itemType: '', quantity: '', fuelFilled: '', distanceTravelled: '',
-  fromPlant: '', toPlant: '', departureTime: null, arrivalTime: null,
+  fromPlant: '', fromPlantId: '', toPlant: '', toPlantId: '', odometerStart: '', odometerEnd: '',
+  departureTime: null, arrivalTime: null,
 });
 
-const tripToForm = (t: TripFirestore & { id: string }): FormState => ({
+const tripToForm = (t: TripRecord & { id: string }): FormState => ({
   vehicleNo: t.truck,
+  vehicleId: t.vehicleId ?? '',
   lrNo: t.bidNo,
   driverName: t.driverName,
   driverUserId: t.driverUserId ?? '',
+  driverId: t.driverId ?? '',
   companyName: t.companyName,
   itemType: t.itemType,
   quantity: t.quantity,
   fuelFilled: t.fuelFilled,
   distanceTravelled: t.distanceTravelled ?? '',
   fromPlant: t.fromPlant,
+  fromPlantId: t.fromPlantId ?? '',
   toPlant: t.toPlant,
+  toPlantId: t.toPlantId ?? '',
+  odometerStart: t.odometerStart != null ? String(t.odometerStart) : '',
+  odometerEnd: t.odometerEnd != null ? String(t.odometerEnd) : '',
   departureTime: t.departureTime,
   arrivalTime: t.arrivalTime,
 });
@@ -202,7 +228,7 @@ const tripToForm = (t: TripFirestore & { id: string }): FormState => ({
 /* ─── Main Screen ────────────────────────────────────────────────── */
 export default function TripsScreen({ role, pendingTripId, onPendingTripConsumed }: Props) {
   const user = auth.currentUser;
-  const [trips, setTrips] = useState<(TripFirestore & { id: string })[]>([]);
+  const [trips, setTrips] = useState<(TripRecord & { id: string })[]>([]);
   const [displayCount, setDisplayCount] = useState(PAGE_SIZE);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -210,8 +236,15 @@ export default function TripsScreen({ role, pendingTripId, onPendingTripConsumed
   const [searchQ, setSearchQ] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'delivered'>('all');
 
+  const [plantList, setPlantList] = useState<(Plant & { id: string })[]>([]);
   const [plants, setPlants] = useState<string[]>([]);
   const [drivers, setDrivers] = useState<(Driver & { id: string })[]>([]);
+  const [vehicles, setVehicles] = useState<(Vehicle & { id: string })[]>([]);
+
+  const plantIdByName = (name: string) =>
+    plantList.find(p => p.name.toLowerCase() === name.trim().toLowerCase())?.id ?? '';
+  const vehicleIdByReg = (reg: string) =>
+    vehicles.find(v => v.registrationNumber.toLowerCase() === reg.trim().toLowerCase())?.id ?? '';
 
   // Add modal
   const [addModal, setAddModal] = useState(false);
@@ -220,9 +253,15 @@ export default function TripsScreen({ role, pendingTripId, onPendingTripConsumed
 
   // View/Edit modal
   const [viewModal, setViewModal] = useState(false);
-  const [selected, setSelected] = useState<(TripFirestore & { id: string }) | null>(null);
+  const [selected, setSelected] = useState<(TripRecord & { id: string }) | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState<FormState>(emptyForm());
+
+  // Fuel logs (per trip)
+  const [fuelLogs, setFuelLogs] = useState<(FuelLog & { id: string })[]>([]);
+  const [fuelLogModal, setFuelLogModal] = useState(false);
+  const [fuelLogForm, setFuelLogForm] = useState({ liters: '', cost: '', odometerReading: '', fuelStation: '' });
+  const [savingFuelLog, setSavingFuelLog] = useState(false);
 
   // Date pickers
   const [activePicker, setActivePicker] = useState<null | 'add-dep' | 'edit-dep' | 'edit-arr'>(null);
@@ -266,14 +305,17 @@ export default function TripsScreen({ role, pendingTripId, onPendingTripConsumed
   const loadAll = async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const [fetchedTrips, fetchedDrivers] = await Promise.all([
+      const [fetchedTrips, fetchedDrivers, fetchedVehicles] = await Promise.all([
         role === 'driver' ? getTripsByUser(user?.uid ?? '') : getTrips(),
         getDrivers(),
+        getVehicles(),
       ]);
       await seedDefaultPlantsIfEmpty();
       const fetchedPlants = await getPlants();
       setTrips(fetchedTrips);
       setDrivers(fetchedDrivers);
+      setVehicles(fetchedVehicles);
+      setPlantList(fetchedPlants);
       setPlants(fetchedPlants.map(p => p.name));
     } catch (e) {
       console.error(e);
@@ -294,7 +336,17 @@ export default function TripsScreen({ role, pendingTripId, onPendingTripConsumed
     finally { setRefreshing(false); }
   };
 
-  useEffect(() => { loadAll(); }, []);
+  useEffect(() => {
+    loadAll();
+    if (role === 'driver' && user?.uid) {
+      const unsub = subscribeToDriverTrips(user.uid, setTrips);
+      return unsub;
+    }
+  }, []);
+
+  useEffect(() => {
+    registerOfflineHandler('addFuelLog', async (payload) => { await addFuelLog(payload); });
+  }, []);
 
   // Auto-open detail modal when navigated from Home screen
   useEffect(() => {
@@ -350,6 +402,7 @@ export default function TripsScreen({ role, pendingTripId, onPendingTripConsumed
       const driverUid = form.driverUserId;
       await addTrip({
         truck: vehicleNo.trim().toUpperCase(),
+        vehicleId: form.vehicleId || vehicleIdByReg(vehicleNo),
         bidNo: lrNo.trim(),
         driverName: driverName.trim(),
         companyName: companyName.trim(),
@@ -358,13 +411,18 @@ export default function TripsScreen({ role, pendingTripId, onPendingTripConsumed
         fuelFilled: '0',
         distanceTravelled: form.distanceTravelled.trim() || '0',
         fromPlant: fromPlant.trim(),
+        fromPlantId: form.fromPlantId || plantIdByName(fromPlant),
         toPlant: toPlant.trim(),
+        toPlantId: form.toPlantId || plantIdByName(toPlant),
+        odometerStart: form.odometerStart.trim() ? parseFloat(form.odometerStart) : undefined,
+        odometerEnd: form.odometerEnd.trim() ? parseFloat(form.odometerEnd) : undefined,
         departureTime: departureTime,
         arrivalTime: null,
         status: 'Active',
         time: 'Just now',
         userId: user?.uid ?? '',
         driverUserId: driverUid,
+        driverId: form.driverId,
       });
       if (driverUid) {
         addNotification({
@@ -395,6 +453,7 @@ export default function TripsScreen({ role, pendingTripId, onPendingTripConsumed
     try {
       await updateTrip(selected.id, {
         truck: f.vehicleNo.trim().toUpperCase(),
+        vehicleId: f.vehicleId || vehicleIdByReg(f.vehicleNo),
         bidNo: f.lrNo.trim(),
         driverName: f.driverName.trim(),
         companyName: f.companyName.trim(),
@@ -403,12 +462,24 @@ export default function TripsScreen({ role, pendingTripId, onPendingTripConsumed
         fuelFilled: f.fuelFilled.trim() || '0',
         distanceTravelled: f.distanceTravelled.trim() || '0',
         fromPlant: f.fromPlant.trim(),
+        fromPlantId: f.fromPlantId || plantIdByName(f.fromPlant),
         toPlant: f.toPlant.trim(),
+        toPlantId: f.toPlantId || plantIdByName(f.toPlant),
+        odometerStart: f.odometerStart.trim() ? parseFloat(f.odometerStart) : undefined,
+        odometerEnd: f.odometerEnd.trim() ? parseFloat(f.odometerEnd) : undefined,
         departureTime: f.departureTime!,
         arrivalTime: f.arrivalTime,
         status: f.arrivalTime ? 'Delivered' : 'Active',
         driverUserId: f.driverUserId,
+        driverId: f.driverId,
       });
+      if (f.driverUserId && f.driverUserId !== selected.driverUserId) {
+        addNotification({
+          driverUserId: f.driverUserId,
+          title: 'Trip Reassigned',
+          body: `${f.fromPlant.trim()} → ${f.toPlant.trim()} · ${f.vehicleNo.trim().toUpperCase()}`,
+        }).catch(() => {});
+      }
       setIsEditing(false);
       setViewModal(false);
       setSelected(null);
@@ -441,15 +512,65 @@ export default function TripsScreen({ role, pendingTripId, onPendingTripConsumed
     ]);
   };
 
+  const openFuelLogModal = () => {
+    setFuelLogForm({ liters: '', cost: '', odometerReading: '', fuelStation: '' });
+    setFuelLogModal(true);
+  };
+
+  const handleSaveFuelLog = async () => {
+    if (!selected || !selected.vehicleId) {
+      Alert.alert('Vehicle required', 'This trip has no linked vehicle to log fuel against.');
+      return;
+    }
+    const liters = parseFloat(fuelLogForm.liters);
+    if (!fuelLogForm.liters.trim() || isNaN(liters) || liters <= 0) {
+      Alert.alert('Required Fields', 'Please enter a valid liters amount.');
+      return;
+    }
+    setSavingFuelLog(true);
+    const logPayload = {
+      tripId: selected.id,
+      vehicleId: selected.vehicleId,
+      liters,
+      cost: fuelLogForm.cost.trim() ? parseFloat(fuelLogForm.cost) : undefined,
+      odometerReading: fuelLogForm.odometerReading.trim() ? parseFloat(fuelLogForm.odometerReading) : undefined,
+      fuelStation: fuelLogForm.fuelStation.trim(),
+      loggedBy: user?.uid,
+    };
+    try {
+      const net = await NetInfo.fetch();
+      const online = net.isConnected && net.isInternetReachable !== false;
+      if (!online) {
+        await enqueueOfflineOp('addFuelLog', logPayload);
+        setFuelLogs(prev => [{ ...logPayload, id: `pending_${Date.now()}` }, ...prev]);
+        setFuelLogModal(false);
+        Alert.alert('Offline', 'No connection — this fuel log will sync automatically once you\'re back online.');
+      } else {
+        await addFuelLog(logPayload);
+        const logs = await getFuelLogsByTrip(selected.id);
+        setFuelLogs(logs);
+        setFuelLogModal(false);
+      }
+    } catch {
+      Alert.alert('Error', 'Failed to save fuel log.');
+    } finally {
+      setSavingFuelLog(false);
+    }
+  };
+
   const openAdd = () => {
     setForm(emptyForm());
     setAddModal(true);
   };
 
-  const openView = (t: TripFirestore & { id: string }) => {
+  const openView = (t: TripRecord & { id: string }) => {
     setSelected(t);
     setIsEditing(false);
     setViewModal(true);
+    setFuelLogs([]);
+    if (t.id) {
+      getFuelLogsByTrip(t.id).then(setFuelLogs).catch(() => {});
+    }
   };
 
   const openEdit = () => {
@@ -584,22 +705,27 @@ export default function TripsScreen({ role, pendingTripId, onPendingTripConsumed
       <Modal visible={addModal} transparent animationType="slide" onRequestClose={() => { setAddModal(false); Keyboard.dismiss(); }}>
         <KeyboardAvoidingView style={m.overlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <Animated.View style={[m.sheet, { transform: [{ translateY: swipeY }] }]}>
-            <View style={m.handle} {...addModalPan.panHandlers} hitSlop={{ top: 10, bottom: 20, left: 100, right: 100 }} />
+            <View style={m.dragHeader} {...addModalPan.panHandlers}>
+              <View style={m.handle} />
+              <Text style={m.title}>Add New Trip</Text>
+            </View>
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
               <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
               <View>
-              <Text style={m.title}>Add New Trip</Text>
 
-              <View style={m.row}>
-                <View style={{ flex: 1 }}>
-                  <Text style={inp.label}>Vehicle No. *</Text>
-                  <TextInput style={inp.field} value={form.vehicleNo} onChangeText={t => setField('vehicleNo', t)} placeholder="e.g. HR26AB1234" placeholderTextColor={Colors.textMuted} autoCapitalize="characters" />
-                </View>
-                <View style={{ width: Spacing[3] }} />
-                <View style={{ flex: 1 }}>
-                  <Text style={inp.label}>LR No. *</Text>
-                  <TextInput style={inp.field} value={form.lrNo} onChangeText={t => setField('lrNo', t)} placeholder="LR Number" placeholderTextColor={Colors.textMuted} />
-                </View>
+              <View style={{ zIndex: 210, elevation: 21 }}>
+                <DropdownInput
+                  label="Vehicle No. *"
+                  value={form.vehicleNo}
+                  onChangeText={t => { setField('vehicleNo', t); setField('vehicleId', ''); }}
+                  suggestions={vehicles.map(v => v.registrationNumber)}
+                  onSelect={reg => { setField('vehicleNo', reg); setField('vehicleId', vehicleIdByReg(reg)); }}
+                  zIndex={210}
+                />
+              </View>
+              <View style={{ marginBottom: Spacing[3] }}>
+                <Text style={inp.label}>LR No. *</Text>
+                <TextInput style={inp.field} value={form.lrNo} onChangeText={t => setField('lrNo', t)} placeholder="LR Number" placeholderTextColor={Colors.textMuted} />
               </View>
 
               <DriverDropdown
@@ -607,7 +733,7 @@ export default function TripsScreen({ role, pendingTripId, onPendingTripConsumed
                 value={form.driverName}
                 onChangeText={t => setField('driverName', t)}
                 drivers={drivers}
-                onSelect={(name, uid) => { setField('driverName', name); setField('driverUserId', uid); }}
+                onSelect={(name, uid, driverId) => { setField('driverName', name); setField('driverUserId', uid); setField('driverId', driverId); }}
                 zIndex={200}
               />
 
@@ -632,9 +758,9 @@ export default function TripsScreen({ role, pendingTripId, onPendingTripConsumed
                 <DropdownInput
                   label="From Plant *"
                   value={form.fromPlant}
-                  onChangeText={t => setField('fromPlant', t)}
+                  onChangeText={t => { setField('fromPlant', t); setField('fromPlantId', ''); }}
                   suggestions={plants}
-                  onSelect={p => setField('fromPlant', p)}
+                  onSelect={p => { setField('fromPlant', p); setField('fromPlantId', plantIdByName(p)); }}
                   zIndex={120}
                 />
               </View>
@@ -642,16 +768,27 @@ export default function TripsScreen({ role, pendingTripId, onPendingTripConsumed
                 <DropdownInput
                   label="To Plant *"
                   value={form.toPlant}
-                  onChangeText={t => setField('toPlant', t)}
+                  onChangeText={t => { setField('toPlant', t); setField('toPlantId', ''); }}
                   suggestions={plants}
-                  onSelect={p => setField('toPlant', p)}
+                  onSelect={p => { setField('toPlant', p); setField('toPlantId', plantIdByName(p)); }}
                   zIndex={110}
                 />
               </View>
 
               <View style={{ zIndex: 1 }}>
+                <View style={m.row}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={inp.label}>Odometer Start (km)</Text>
+                    <TextInput style={inp.field} value={form.odometerStart} onChangeText={t => setField('odometerStart', t)} placeholder="Optional" placeholderTextColor={Colors.textMuted} keyboardType="decimal-pad" />
+                  </View>
+                  <View style={{ width: Spacing[3] }} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={inp.label}>Odometer End (km)</Text>
+                    <TextInput style={inp.field} value={form.odometerEnd} onChangeText={t => setField('odometerEnd', t)} placeholder="Optional" placeholderTextColor={Colors.textMuted} keyboardType="decimal-pad" />
+                  </View>
+                </View>
                 <Text style={inp.label}>Distance (km)</Text>
-                <TextInput style={[inp.field, { marginBottom: Spacing[3] }]} value={form.distanceTravelled} onChangeText={t => setField('distanceTravelled', t)} placeholder="Optional" placeholderTextColor={Colors.textMuted} keyboardType="decimal-pad" />
+                <TextInput style={[inp.field, { marginBottom: Spacing[3] }]} value={form.distanceTravelled} onChangeText={t => setField('distanceTravelled', t)} placeholder="Auto-computed from odometer if both are set" placeholderTextColor={Colors.textMuted} keyboardType="decimal-pad" />
 
                 <DateBtn label="Departure Time *" value={form.departureTime} onPress={() => { setTempDate(form.departureTime ?? new Date()); setPickerPhase('date'); setActivePicker('add-dep'); }} />
                 {activePicker === 'add-dep' && (
@@ -708,24 +845,29 @@ export default function TripsScreen({ role, pendingTripId, onPendingTripConsumed
       <Modal visible={viewModal} transparent animationType="slide" onRequestClose={() => { setViewModal(false); setIsEditing(false); Keyboard.dismiss(); }}>
         <KeyboardAvoidingView style={m.overlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <Animated.View style={[m.sheet, { transform: [{ translateY: viewSwipeY }] }]}>
-            <View style={m.handle} {...viewModalPan.panHandlers} hitSlop={{ top: 10, bottom: 20, left: 100, right: 100 }} />
+            <View style={m.dragHeader} {...viewModalPan.panHandlers}>
+              <View style={m.handle} />
+              <Text style={m.title}>{isEditing ? 'Edit Trip' : 'Trip Details'}</Text>
+            </View>
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
               <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
               <View>
-              <Text style={m.title}>{isEditing ? 'Edit Trip' : 'Trip Details'}</Text>
 
               {isEditing ? (
                 <>
-                  <View style={m.row}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={inp.label}>Vehicle No. *</Text>
-                      <TextInput style={inp.field} value={editForm.vehicleNo} onChangeText={t => setEditField('vehicleNo', t)} autoCapitalize="characters" />
-                    </View>
-                    <View style={{ width: Spacing[3] }} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={inp.label}>LR No. *</Text>
-                      <TextInput style={inp.field} value={editForm.lrNo} onChangeText={t => setEditField('lrNo', t)} />
-                    </View>
+                  <View style={{ zIndex: 210, elevation: 21 }}>
+                    <DropdownInput
+                      label="Vehicle No. *"
+                      value={editForm.vehicleNo}
+                      onChangeText={t => { setEditField('vehicleNo', t); setEditField('vehicleId', ''); }}
+                      suggestions={vehicles.map(v => v.registrationNumber)}
+                      onSelect={reg => { setEditField('vehicleNo', reg); setEditField('vehicleId', vehicleIdByReg(reg)); }}
+                      zIndex={210}
+                    />
+                  </View>
+                  <View style={{ marginBottom: Spacing[3] }}>
+                    <Text style={inp.label}>LR No. *</Text>
+                    <TextInput style={inp.field} value={editForm.lrNo} onChangeText={t => setEditField('lrNo', t)} />
                   </View>
 
                   <DriverDropdown
@@ -733,7 +875,7 @@ export default function TripsScreen({ role, pendingTripId, onPendingTripConsumed
                     value={editForm.driverName}
                     onChangeText={t => setEditField('driverName', t)}
                     drivers={drivers}
-                    onSelect={(name, uid) => { setEditField('driverName', name); setEditField('driverUserId', uid); }}
+                    onSelect={(name, uid, driverId) => { setEditField('driverName', name); setEditField('driverUserId', uid); setEditField('driverId', driverId); }}
                     zIndex={200}
                   />
 
@@ -762,15 +904,26 @@ export default function TripsScreen({ role, pendingTripId, onPendingTripConsumed
                   </View>
 
                   <View style={{ zIndex: 120, elevation: 12 }}>
-                    <DropdownInput label="From Plant *" value={editForm.fromPlant} onChangeText={t => setEditField('fromPlant', t)} suggestions={plants} onSelect={p => setEditField('fromPlant', p)} zIndex={120} />
+                    <DropdownInput label="From Plant *" value={editForm.fromPlant} onChangeText={t => { setEditField('fromPlant', t); setEditField('fromPlantId', ''); }} suggestions={plants} onSelect={p => { setEditField('fromPlant', p); setEditField('fromPlantId', plantIdByName(p)); }} zIndex={120} />
                   </View>
                   <View style={{ zIndex: 110, elevation: 11 }}>
-                    <DropdownInput label="To Plant *" value={editForm.toPlant} onChangeText={t => setEditField('toPlant', t)} suggestions={plants} onSelect={p => setEditField('toPlant', p)} zIndex={110} />
+                    <DropdownInput label="To Plant *" value={editForm.toPlant} onChangeText={t => { setEditField('toPlant', t); setEditField('toPlantId', ''); }} suggestions={plants} onSelect={p => { setEditField('toPlant', p); setEditField('toPlantId', plantIdByName(p)); }} zIndex={110} />
                   </View>
 
                   <View style={{ zIndex: 1 }}>
+                    <View style={m.row}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={inp.label}>Odometer Start (km)</Text>
+                        <TextInput style={inp.field} value={editForm.odometerStart} onChangeText={t => setEditField('odometerStart', t)} placeholder="Optional" placeholderTextColor={Colors.textMuted} keyboardType="decimal-pad" />
+                      </View>
+                      <View style={{ width: Spacing[3] }} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={inp.label}>Odometer End (km)</Text>
+                        <TextInput style={inp.field} value={editForm.odometerEnd} onChangeText={t => setEditField('odometerEnd', t)} placeholder="Optional" placeholderTextColor={Colors.textMuted} keyboardType="decimal-pad" />
+                      </View>
+                    </View>
                     <Text style={inp.label}>Distance (km)</Text>
-                    <TextInput style={[inp.field, { marginBottom: Spacing[3] }]} value={editForm.distanceTravelled} onChangeText={t => setEditField('distanceTravelled', t)} keyboardType="decimal-pad" placeholder="Optional" placeholderTextColor={Colors.textMuted} />
+                    <TextInput style={[inp.field, { marginBottom: Spacing[3] }]} value={editForm.distanceTravelled} onChangeText={t => setEditField('distanceTravelled', t)} keyboardType="decimal-pad" placeholder="Auto-computed from odometer if both are set" placeholderTextColor={Colors.textMuted} />
 
                     <DateBtn label="Departure Time *" value={editForm.departureTime} onPress={() => { setTempDate(editForm.departureTime ?? new Date()); setPickerPhase('date'); setActivePicker('edit-dep'); }} />
                     {activePicker === 'edit-dep' && (
@@ -880,6 +1033,27 @@ export default function TripsScreen({ role, pendingTripId, onPendingTripConsumed
                     </View>
                   ))}
 
+                  <View style={fl.section}>
+                    <View style={fl.header}>
+                      <Text style={fl.title}>Fuel Logs</Text>
+                      <TouchableOpacity onPress={openFuelLogModal} activeOpacity={0.8}>
+                        <Text style={fl.addLink}>+ Add</Text>
+                      </TouchableOpacity>
+                    </View>
+                    {fuelLogs.length === 0 ? (
+                      <Text style={fl.empty}>No fuel logs recorded for this trip.</Text>
+                    ) : (
+                      fuelLogs.map(log => (
+                        <View key={log.id} style={fl.row}>
+                          <Text style={fl.rowMain}>{log.liters} L{log.cost ? ` · ₹${log.cost}` : ''}</Text>
+                          <Text style={fl.rowSub}>
+                            {[log.fuelStation, log.odometerReading != null ? `${log.odometerReading} km` : null].filter(Boolean).join(' · ') || '—'}
+                          </Text>
+                        </View>
+                      ))
+                    )}
+                  </View>
+
                   <View style={m.btns}>
                     <TouchableOpacity style={m.cancelBtn} onPress={() => { setViewModal(false); setSelected(null); }}>
                       <Text style={m.cancelBtnText}>Close</Text>
@@ -901,6 +1075,45 @@ export default function TripsScreen({ role, pendingTripId, onPendingTripConsumed
               </TouchableWithoutFeedback>
             </ScrollView>
           </Animated.View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ─── ADD FUEL LOG MODAL ─── */}
+      <Modal visible={fuelLogModal} transparent animationType="slide" onRequestClose={() => setFuelLogModal(false)}>
+        <KeyboardAvoidingView style={m.overlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+          <View style={m.sheet}>
+            <View style={m.dragHeader}>
+              <View style={m.handle} />
+              <Text style={m.title}>Add Fuel Log</Text>
+            </View>
+
+            <Text style={inp.label}>Liters *</Text>
+            <TextInput style={[inp.field, { marginBottom: Spacing[3] }]} value={fuelLogForm.liters} onChangeText={t => setFuelLogForm(p => ({ ...p, liters: t }))} placeholder="e.g. 40" placeholderTextColor={Colors.textMuted} keyboardType="decimal-pad" />
+
+            <View style={m.row}>
+              <View style={{ flex: 1 }}>
+                <Text style={inp.label}>Cost (₹)</Text>
+                <TextInput style={inp.field} value={fuelLogForm.cost} onChangeText={t => setFuelLogForm(p => ({ ...p, cost: t }))} placeholder="Optional" placeholderTextColor={Colors.textMuted} keyboardType="decimal-pad" />
+              </View>
+              <View style={{ width: Spacing[3] }} />
+              <View style={{ flex: 1 }}>
+                <Text style={inp.label}>Odometer (km)</Text>
+                <TextInput style={inp.field} value={fuelLogForm.odometerReading} onChangeText={t => setFuelLogForm(p => ({ ...p, odometerReading: t }))} placeholder="Optional" placeholderTextColor={Colors.textMuted} keyboardType="decimal-pad" />
+              </View>
+            </View>
+
+            <Text style={inp.label}>Fuel Station</Text>
+            <TextInput style={[inp.field, { marginBottom: Spacing[3] }]} value={fuelLogForm.fuelStation} onChangeText={t => setFuelLogForm(p => ({ ...p, fuelStation: t }))} placeholder="Optional" placeholderTextColor={Colors.textMuted} />
+
+            <View style={m.btns}>
+              <TouchableOpacity style={m.cancelBtn} onPress={() => setFuelLogModal(false)} disabled={savingFuelLog}>
+                <Text style={m.cancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={m.saveBtn} onPress={handleSaveFuelLog} disabled={savingFuelLog} activeOpacity={0.85}>
+                {savingFuelLog ? <ActivityIndicator color="#fff" size="small" /> : <Text style={m.saveBtnText}>Save</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
         </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
@@ -1083,15 +1296,20 @@ const m = {
     padding: Spacing[5],
     maxHeight: '92%' as const,
   },
+  dragHeader: {
+    alignItems: 'center' as const,
+    paddingTop: Spacing[1],
+    paddingBottom: Spacing[3],
+  },
   handle: {
     width: 40,
     height: 4,
     backgroundColor: Colors.border,
     borderRadius: 2,
     alignSelf: 'center' as const,
-    marginBottom: Spacing[4],
+    marginBottom: Spacing[3],
   },
-  title: { fontSize: FontSize.xl, fontWeight: '800' as const, color: Colors.text, marginBottom: Spacing[4] },
+  title: { fontSize: FontSize.xl, fontWeight: '800' as const, color: Colors.text },
   row: { flexDirection: 'row' as const, marginBottom: Spacing[3] },
   clearBtn: { marginBottom: Spacing[3] } as const,
   clearBtnText: { fontSize: FontSize.sm, color: Colors.danger, fontWeight: '600' as const },
@@ -1108,7 +1326,7 @@ const m = {
   cancelBtnText: { color: Colors.textSecondary, fontWeight: '600' as const, fontSize: FontSize.base },
   saveBtn: {
     flex: 1,
-    backgroundColor: Colors.success,
+    backgroundColor: Colors.primary,
     borderRadius: Radius.md,
     paddingVertical: 14,
     alignItems: 'center' as const,
@@ -1127,6 +1345,26 @@ const dv = {
   },
   label: { fontSize: FontSize.sm, fontWeight: '600' as const, color: Colors.textSecondary, width: 100 },
   value: { fontSize: FontSize.base, color: Colors.text, flex: 1, flexWrap: 'wrap' as const },
+};
+
+const fl = {
+  section: { marginTop: Spacing[2], marginBottom: Spacing[2] } as const,
+  header: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
+    marginBottom: Spacing[2],
+  },
+  title: { fontSize: FontSize.sm, fontWeight: '700' as const, color: Colors.textSecondary, textTransform: 'uppercase' as const, letterSpacing: 0.5 },
+  addLink: { fontSize: FontSize.sm, fontWeight: '700' as const, color: Colors.primary },
+  empty: { fontSize: FontSize.sm, color: Colors.textMuted },
+  row: {
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  rowMain: { fontSize: FontSize.sm, fontWeight: '600' as const, color: Colors.text },
+  rowSub: { fontSize: FontSize.xs, color: Colors.textMuted, marginTop: 2 },
 };
 
 const dp = {

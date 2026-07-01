@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
-  ScrollView,
   TouchableOpacity,
   FlatList,
   Alert,
@@ -16,10 +15,9 @@ import {
   PanResponder,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { collection, getDocs, doc, updateDoc, query, where } from 'firebase/firestore';
-import { db, auth } from '../firebaseConfig';
+import { auth } from '../supabaseConfig';
 import { useNavigation } from '@react-navigation/native';
-import { isAdmin, isManager } from '../services/userService';
+import { getUserByEmail, getUsers, isAdmin, isManager, updateUserRole } from '../services/userService';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
 import { ShimmerRow } from '../components/Shimmer';
 
@@ -85,8 +83,7 @@ export default function UserManagementScreen() {
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      const snap = await getDocs(collection(db, 'users'));
-      const list: UserRecord[] = snap.docs.map(d => ({ uid: d.id, ...d.data() } as UserRecord));
+      const list = await getUsers();
       list.sort((a, b) => a.email.localeCompare(b.email));
       setUsers(list);
     } catch {
@@ -106,7 +103,7 @@ export default function UserManagementScreen() {
     if (!selected) return;
     setSaving(true);
     try {
-      await updateDoc(doc(db, 'users', selected.uid), { role: pendingRole });
+      await updateUserRole(selected.uid, pendingRole);
       setUsers(prev => prev.map(u => u.uid === selected.uid ? { ...u, role: pendingRole } : u));
       setRoleModal(false);
       setSelected(null);
@@ -123,14 +120,13 @@ export default function UserManagementScreen() {
     if (!isUserAdmin) { Alert.alert('Access Denied', 'Only admins can assign roles.'); return; }
     setSaving(true);
     try {
-      const snap = await getDocs(query(collection(db, 'users'), where('email', '==', email)));
-      if (snap.empty) {
+      const userRecord = await getUserByEmail(email);
+      if (!userRecord) {
         Alert.alert('Not Found', 'No account found for this email. The user must register first.');
         return;
       }
-      const docRef = snap.docs[0];
-      await updateDoc(doc(db, 'users', docRef.id), { role: newRole });
-      setUsers(prev => prev.map(u => u.uid === docRef.id ? { ...u, role: newRole } : u));
+      await updateUserRole(userRecord.uid, newRole);
+      setUsers(prev => prev.map(u => u.uid === userRecord.uid ? { ...u, role: newRole } : u));
       setAddModal(false);
       setNewEmail('');
       setNewRole('driver');
@@ -275,8 +271,10 @@ export default function UserManagementScreen() {
       <Modal visible={addModal} transparent animationType="slide" onRequestClose={() => setAddModal(false)}>
         <KeyboardAvoidingView style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <Animated.View style={[mo.sheet, { transform: [{ translateY: addSwipeY }] }]}>
-            <View style={mo.handle} {...addModalPan.panHandlers} hitSlop={{ top: 10, bottom: 20, left: 100, right: 100 }} />
-            <Text style={mo.title}>Assign Role</Text>
+            <View style={mo.dragHeader} {...addModalPan.panHandlers}>
+              <View style={mo.handle} />
+              <Text style={mo.title}>Assign Role</Text>
+            </View>
             <Text style={mo.sub}>The user must have already registered an account.</Text>
 
             <Text style={[mo.sub, { marginTop: Spacing[4], fontWeight: '600' as const, color: Colors.textSecondary }]}>Email address</Text>
@@ -446,13 +444,18 @@ const mo = {
     borderTopRightRadius: Radius.xl,
     padding: Spacing[6],
   },
+  dragHeader: {
+    alignItems: 'center' as const,
+    paddingTop: Spacing[1],
+    paddingBottom: Spacing[3],
+  },
   handle: {
     width: 40,
     height: 4,
     backgroundColor: Colors.border,
     borderRadius: 2,
     alignSelf: 'center' as const,
-    marginBottom: Spacing[5],
+    marginBottom: Spacing[3],
   },
   title: { fontSize: FontSize.xl, fontWeight: '800' as const, color: Colors.text, marginBottom: Spacing[1] },
   sub: { fontSize: FontSize.sm, color: Colors.textMuted, marginBottom: Spacing[4] },

@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { auth } from '../firebaseConfig';
+import { auth } from '../supabaseConfig';
 import { getUserProfile } from '../services/userService';
 import { getDriverByUserId, getDriverByEmail, linkDriverToUser } from '../services/driverService';
+import { registerForPushNotifications } from '../utils/pushNotifications';
 import { Colors, FontSize, Shadow } from '../utils/theme';
 import DashboardScreen from './DashboardScreen';
 import DriverHomeScreen from './DriverHomeScreen';
@@ -53,6 +54,12 @@ export default function MainTabsScreen() {
       setLoadingRole(false);
     }).catch(() => setLoadingRole(false));
   }, []);
+
+  // Register this device for push notifications once we know who's signed in.
+  useEffect(() => {
+    if (!user?.uid) return;
+    registerForPushNotifications(user.uid).catch(() => {});
+  }, [user?.uid]);
 
   // Check driver profile completeness + auto-link admin-created record
   useEffect(() => {

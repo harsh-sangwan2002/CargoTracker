@@ -203,8 +203,10 @@ export default function PlantManagementScreen() {
       <Modal visible={addModal} transparent animationType="slide" onRequestClose={() => setAddModal(false)}>
         <KeyboardAvoidingView style={m.overlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <Animated.View style={[m.sheet, { transform: [{ translateY: addSwipeY }] }]}>
-            <View style={m.handle} {...addModalPan.panHandlers} hitSlop={{ top: 10, bottom: 20, left: 100, right: 100 }} />
-            <Text style={m.title}>Add Plant</Text>
+            <View style={m.dragHeader} {...addModalPan.panHandlers}>
+              <View style={m.handle} />
+              <Text style={m.title}>Add Plant</Text>
+            </View>
 
             <Text style={m.label}>Plant Name *</Text>
             <TextInput
@@ -242,8 +244,10 @@ export default function PlantManagementScreen() {
       <Modal visible={editModal} transparent animationType="slide" onRequestClose={() => setEditModal(false)}>
         <KeyboardAvoidingView style={m.overlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <Animated.View style={[m.sheet, { transform: [{ translateY: editSwipeY }] }]}>
-            <View style={m.handle} {...editModalPan.panHandlers} hitSlop={{ top: 10, bottom: 20, left: 100, right: 100 }} />
-            <Text style={m.title}>Edit Plant</Text>
+            <View style={m.dragHeader} {...editModalPan.panHandlers}>
+              <View style={m.handle} />
+              <Text style={m.title}>Edit Plant</Text>
+            </View>
 
             <Text style={m.label}>Plant Name *</Text>
             <TextInput
@@ -300,7 +304,7 @@ const s = {
   backBtnText: { fontSize: 28, color: Colors.primary, fontWeight: '700' as const, lineHeight: 32 },
   pageTitle: { fontSize: FontSize['2xl'], fontWeight: '800' as const, color: Colors.text, letterSpacing: -0.5 },
   addBtn: {
-    backgroundColor: Colors.warning,
+    backgroundColor: Colors.primary,
     paddingHorizontal: Spacing[4],
     paddingVertical: Spacing[2],
     borderRadius: Radius.md,
@@ -337,7 +341,7 @@ const s = {
     width: 44,
     height: 44,
     borderRadius: Radius.md,
-    backgroundColor: Colors.warningLight,
+    backgroundColor: Colors.primaryLight,
     justifyContent: 'center' as const,
     alignItems: 'center' as const,
     marginRight: Spacing[3],
@@ -376,15 +380,20 @@ const m = {
     borderTopRightRadius: Radius.xl,
     padding: Spacing[6],
   },
+  dragHeader: {
+    alignItems: 'center' as const,
+    paddingTop: Spacing[1],
+    paddingBottom: Spacing[4],
+  },
   handle: {
     width: 40,
     height: 4,
     backgroundColor: Colors.border,
     borderRadius: 2,
     alignSelf: 'center' as const,
-    marginBottom: Spacing[5],
+    marginBottom: Spacing[3],
   },
-  title: { fontSize: FontSize.xl, fontWeight: '800' as const, color: Colors.text, marginBottom: Spacing[5] },
+  title: { fontSize: FontSize.xl, fontWeight: '800' as const, color: Colors.text },
   label: { fontSize: FontSize.sm, fontWeight: '600' as const, color: Colors.textSecondary, marginBottom: Spacing[2] },
   input: {
     backgroundColor: Colors.surfaceAlt,
@@ -410,7 +419,7 @@ const m = {
   cancelText: { color: Colors.textSecondary, fontWeight: '600' as const, fontSize: FontSize.base },
   saveBtn: {
     flex: 1,
-    backgroundColor: Colors.warning,
+    backgroundColor: Colors.primary,
     borderRadius: Radius.md,
     paddingVertical: 14,
     alignItems: 'center' as const,

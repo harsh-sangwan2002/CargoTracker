@@ -11,9 +11,8 @@ import {
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { useNavigation } from '@react-navigation/native';
-import { auth } from '../firebaseConfig';
+import { createUserWithEmailAndPassword } from '../supabaseConfig';
 import { createUserProfile } from '../services/userService';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
 
@@ -40,16 +39,28 @@ export default function RegisterScreen() {
     }
     setLoading(true);
     try {
-      const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
-      await createUserProfile(cred.user.uid, email.trim(), 'driver');
+      const cred = await createUserWithEmailAndPassword(email.trim(), password);
+      if (!cred.user?.id) throw new Error('Account created but user session was not returned.');
+      try {
+        await createUserProfile(cred.user.id, email.trim(), 'driver');
+      } catch {
+        // The database trigger on auth.users is the source of truth; this client write is only a fallback.
+      }
       Alert.alert('Account created', 'You have been registered as a driver. An admin can update your role if needed.');
     } catch (err: any) {
       const map: Record<string, string> = {
-        'auth/email-already-in-use': 'This email is already registered.',
-        'auth/invalid-email': 'Please enter a valid email address.',
-        'auth/weak-password': 'Password must be at least 6 characters.',
+        'user_already_exists': 'This email is already registered.',
+        'email_address_invalid': 'Please enter a valid email address.',
+        'weak_password': 'Password must be at least 6 characters.',
+        'over_email_send_rate_limit': 'Supabase email limit reached. Disable email confirmation for development or configure custom SMTP in Supabase Auth settings.',
       };
-      Alert.alert('Registration Failed', map[err.code] ?? err.message ?? 'Something went wrong.');
+      const message = String(err.message ?? '').toLowerCase();
+      const friendly =
+        map[err.code] ??
+        (message.includes('email') && message.includes('rate limit')
+          ? 'Supabase email limit reached. Disable email confirmation for development or configure custom SMTP in Supabase Auth settings.'
+          : err.message);
+      Alert.alert('Registration Failed', friendly ?? 'Something went wrong.');
     } finally {
       setLoading(false);
     }
