@@ -1,7 +1,13 @@
 {
   "permissions": {
     "allow": [
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "Bash(pod install *)",
+      "Bash(npx expo *)",
+      "Bash(git -C /Users/kuldeepsangwan/Desktop/CargoTracker show HEAD~2:.env)",
+      "Bash(git -C /Users/kuldeepsangwan/Desktop/CargoTracker log --oneline --all)",
+      "Bash(git -C /Users/kuldeepsangwan/Desktop/CargoTracker show 0c82adb:.env)",
+      "Bash(git -C /Users/kuldeepsangwan/Desktop/CargoTracker log --all --full-history -- .env)"
     ]
   }
 }
