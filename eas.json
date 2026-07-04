@@ -16,7 +16,8 @@
     "production": {
       "distribution": "store",
       "ios": {
-        "buildConfiguration": "Release"
+        "buildConfiguration": "Release",
+        "autoIncrement": true
       },
       "android": {
         "buildType": "app-bundle"
@@ -26,8 +27,7 @@
   "submit": {
     "production": {
       "ios": {
-        "language": "en-US",
-        "appleTeamId": "YOUR_APPLE_TEAM_ID"
+        "language": "en-US"
       }
     }
   }
