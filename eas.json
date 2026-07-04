@@ -14,12 +14,21 @@
       }
     },
     "production": {
+      "distribution": "store",
+      "ios": {
+        "buildConfiguration": "Release"
+      },
       "android": {
-        "buildType": "apk"
+        "buildType": "app-bundle"
       }
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {
+        "language": "en-US",
+        "appleTeamId": "YOUR_APPLE_TEAM_ID"
+      }
+    }
   }
 }
