@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity,
-  Alert, Switch, ActivityIndicator, RefreshControl,
+  Alert, Switch, ActivityIndicator, RefreshControl, TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
@@ -32,6 +32,7 @@ export default function DriverHomeScreen({ onTabPress, onNavigateToTrip }: Props
   const locationWatcher = useRef<Location.LocationSubscription | null>(null);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [dismissingNotifs, setDismissingNotifs] = useState(false);
+  const [searchQ, setSearchQ] = useState('');
 
   const loadNotifications = async () => {
     if (!user?.uid) return;
@@ -195,8 +196,16 @@ export default function DriverHomeScreen({ onTabPress, onNavigateToTrip }: Props
   const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
   // activeTrip = trip the driver has pressed "Start" on (status set to 'active' by startTrip())
   const activeTrip = trips.find(t => t.status === 'active' && !t.arrivalTime);
-  // recentTrips = last 7 (already sorted desc by createdAt)
-  const recentTrips = trips.slice(0, HOME_LIMIT);
+  // recentTrips = last HOME_LIMIT, optionally filtered by search
+  const recentTrips = (() => {
+    if (!searchQ.trim()) return trips.slice(0, HOME_LIMIT);
+    const q = searchQ.toLowerCase();
+    return trips.filter(t =>
+      t.truck.toLowerCase().includes(q) ||
+      (t.fromPlant ?? '').toLowerCase().includes(q) ||
+      (t.toPlant ?? '').toLowerCase().includes(q)
+    ).slice(0, HOME_LIMIT);
+  })();
   const todayCount = trips.filter(t => t.departureTime && t.departureTime >= todayStart).length;
   const completedCount = trips.filter(t => !!t.arrivalTime).length;
 

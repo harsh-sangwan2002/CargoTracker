@@ -367,7 +367,10 @@ export default function TripsScreen({ role, pendingTripId, onPendingTripConsumed
     if (searchQ.trim()) {
       const q = searchQ.toLowerCase();
       f = f.filter(t =>
-        t.truck.toLowerCase().includes(q) || t.driverName.toLowerCase().includes(q)
+        t.truck.toLowerCase().includes(q) ||
+        t.driverName.toLowerCase().includes(q) ||
+        (t.fromPlant ?? '').toLowerCase().includes(q) ||
+        (t.toPlant ?? '').toLowerCase().includes(q)
       );
     }
     if (statusFilter === 'active') f = f.filter(t => !t.arrivalTime);
@@ -408,7 +411,7 @@ export default function TripsScreen({ role, pendingTripId, onPendingTripConsumed
         companyName: companyName.trim(),
         itemType: itemType.trim(),
         quantity: quantity.trim(),
-        fuelFilled: '0',
+        fuelFilled: form.fuelFilled.trim() || '0',
         distanceTravelled: form.distanceTravelled.trim() || '0',
         fromPlant: fromPlant.trim(),
         fromPlantId: form.fromPlantId || plantIdByName(fromPlant),
@@ -599,7 +602,7 @@ export default function TripsScreen({ role, pendingTripId, onPendingTripConsumed
       <View style={s.searchRow}>
         <TextInput
           style={s.search}
-          placeholder="Search vehicle or driver..."
+          placeholder="Search vehicle, driver or plant..."
           placeholderTextColor={Colors.textMuted}
           value={searchQ}
           onChangeText={t => { setSearchQ(t); }}
@@ -749,9 +752,16 @@ export default function TripsScreen({ role, pendingTripId, onPendingTripConsumed
                 </View>
               </View>
 
-              <View style={{ marginBottom: Spacing[3] }}>
-                <Text style={inp.label}>Quantity (tons) *</Text>
-                <TextInput style={inp.field} value={form.quantity} onChangeText={t => setField('quantity', t)} placeholder="0" placeholderTextColor={Colors.textMuted} keyboardType="decimal-pad" />
+              <View style={m.row}>
+                <View style={{ flex: 1 }}>
+                  <Text style={inp.label}>Quantity (tons) *</Text>
+                  <TextInput style={inp.field} value={form.quantity} onChangeText={t => setField('quantity', t)} placeholder="0" placeholderTextColor={Colors.textMuted} keyboardType="decimal-pad" />
+                </View>
+                <View style={{ width: Spacing[3] }} />
+                <View style={{ flex: 1 }}>
+                  <Text style={inp.label}>Fuel Consumed (L)</Text>
+                  <TextInput style={inp.field} value={form.fuelFilled} onChangeText={t => setField('fuelFilled', t)} placeholder="0" placeholderTextColor={Colors.textMuted} keyboardType="decimal-pad" />
+                </View>
               </View>
 
               <View style={{ zIndex: 120, elevation: 12 }}>
