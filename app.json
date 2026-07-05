@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Cargo Tracker",
+    "name": "CargoTracker",
     "slug": "cargo-tracker",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -23,9 +23,6 @@
       }
     },
     "owner": "harsh-sangwan",
-    "plugins": [
-      "expo-font",
-      "expo-notifications"
-    ]
+    "plugins": ["expo-font", "expo-notifications"]
   }
 }

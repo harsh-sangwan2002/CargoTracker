@@ -58,7 +58,7 @@ export default function LoginScreen() {
             <View style={s.logoBox}>
               <Text style={s.logoText}>CT</Text>
             </View>
-            <Text style={s.appName}>Cargo Tracker</Text>
+            <Text style={s.appName}>CargoTracker</Text>
             <Text style={s.tagline}>Fleet Management Platform</Text>
           </View>
 

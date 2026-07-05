@@ -36,14 +36,14 @@ async function sendResendEmail(to: string, otp: string): Promise<void> {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      from: `Cargo Tracker <${RESEND_FROM_EMAIL}>`,
+      from: `CargoTracker <${RESEND_FROM_EMAIL}>`,
       to: [to],
-      subject: 'Your Password Reset Code - Cargo Tracker',
+      subject: 'Your Password Reset Code - CargoTracker',
       html: `
         <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;">
           <h2 style="color:#1e293b;margin-bottom:8px;">Password Reset</h2>
           <p style="color:#475569;margin-bottom:24px;">
-            Enter this code in the Cargo Tracker app to reset your password.
+            Enter this code in the CargoTracker app to reset your password.
             It expires in <strong>10 minutes</strong>.
           </p>
           <div style="background:#f1f5f9;border-radius:12px;padding:24px;text-align:center;margin-bottom:24px;">

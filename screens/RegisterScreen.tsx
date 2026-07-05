@@ -104,7 +104,7 @@ export default function RegisterScreen() {
             <View style={s.logoBox}>
               <Text style={s.logoText}>CT</Text>
             </View>
-            <Text style={s.appName}>Cargo Tracker</Text>
+            <Text style={s.appName}>CargoTracker</Text>
             <Text style={s.tagline}>Create your account</Text>
           </View>
 

@@ -9,6 +9,10 @@
     },
     "preview": {
       "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://jlagdydxwxvjyyxxqykm.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_Cofh-Ejm0KSxrMSVqi7dWg_9dfA33gZ"
+      },
       "android": {
         "buildType": "apk"
       }

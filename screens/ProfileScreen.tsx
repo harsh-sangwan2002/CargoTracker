@@ -500,7 +500,7 @@ export default function ProfileScreen({ role, profileComplete = true, onProfileS
             onPress={() => {
               Alert.alert(
                 'Delete App Data',
-                'This will permanently delete your Cargo Tracker profile data and sign you out. Supabase Auth account deletion requires an admin backend.',
+                'This will permanently delete your CargoTracker profile data and sign you out. Supabase Auth account deletion requires an admin backend.',
                 [
                   { text: 'Cancel', style: 'cancel' },
                   { text: 'Continue', style: 'destructive', onPress: () => setDeleteModal(true) },

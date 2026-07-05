@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { auth } from '../supabaseConfig';
@@ -36,6 +36,7 @@ const ALL_TABS: Tab[] = [
 export default function MainTabsScreen() {
   const route = useRoute<any>();
   const navigation = useNavigation<any>();
+  const insets = useSafeAreaInsets();
   const routeParams = route.params as { driverFilter?: string; openTrips?: boolean } | undefined;
 
   const [activeTab, setActiveTab] = useState<TabId>(routeParams?.openTrips ? 'trips' : 'home');
@@ -154,7 +155,7 @@ export default function MainTabsScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
       <View style={{ flex: 1 }}>{renderContent()}</View>
-      <View style={tabBar.container}>
+      <View style={[tabBar.container, { paddingBottom: 4 + insets.bottom }]}>
         {visibleTabs.map(tab => {
           const active = activeTab === tab.id;
           const showBadge = role === 'driver' && !profileComplete && tab.id === 'profile';

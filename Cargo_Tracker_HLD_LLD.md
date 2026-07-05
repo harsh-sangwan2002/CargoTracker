@@ -34,7 +34,7 @@ Appendix A - Core DDL 17
 
 # 1\. Executive Summary
 
-Cargo Tracker is a role-based fleet operations app for Admins, Managers, and Drivers, built on React Native/Expo with a Supabase (Postgres) backend. This document extends the existing architecture reference into a formal design package: it captures the minimum requirements the product owner has specified, proposes the additional capabilities a production fleet system needs at scale, and defines the High-Level Design (HLD), Low-Level Design (LLD), revised data model, security model, and scaling plan needed to support 2,000 registered users with 1,000 concurrent sessions.
+CargoTracker is a role-based fleet operations app for Admins, Managers, and Drivers, built on React Native/Expo with a Supabase (Postgres) backend. This document extends the existing architecture reference into a formal design package: it captures the minimum requirements the product owner has specified, proposes the additional capabilities a production fleet system needs at scale, and defines the High-Level Design (HLD), Low-Level Design (LLD), revised data model, security model, and scaling plan needed to support 2,000 registered users with 1,000 concurrent sessions.
 
 The existing schema (users, drivers, trips, plants, driverLocations, notifications) is retained conceptually but restructured relationally: free-text fields such as truck, driverName, and fromPlant/toPlant are converted to foreign keys against new vehicles and plants tables so that distance, fuel, and utilization can be aggregated reliably per truck and per driver. New tables are introduced for fuel logs, vehicle maintenance, document/compliance expiry, and audit logging.
 

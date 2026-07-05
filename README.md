@@ -1,6 +1,6 @@
-# Cargo Tracker
+# CargoTracker
 
-Cargo Tracker is an Expo React Native app for fleet trip management, driver assignment, plant management, analytics, and live driver location tracking.
+CargoTracker is an Expo React Native app for fleet trip management, driver assignment, plant management, analytics, and live driver location tracking.
 
 ## Current Stack
 
