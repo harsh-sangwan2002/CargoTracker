@@ -378,6 +378,7 @@ const s = {
     color: Colors.text,
     borderWidth: 1.5,
     borderColor: Colors.border,
+    letterSpacing: 0,
   },
 
   loaderCenter: { flex: 1, justifyContent: 'center' as const, alignItems: 'center' as const } as const,
@@ -470,6 +471,7 @@ const mo = {
     color: Colors.text,
     marginBottom: Spacing[4],
     marginTop: Spacing[2],
+    letterSpacing: 0,
   },
   roles: {
     flexDirection: 'row' as const,

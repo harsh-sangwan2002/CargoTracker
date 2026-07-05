@@ -248,7 +248,7 @@ const s = {
   input: {
     backgroundColor: Colors.surfaceAlt, borderWidth: 1.5, borderColor: Colors.border,
     borderRadius: Radius.md, paddingHorizontal: Spacing[4], paddingVertical: 14,
-    fontSize: FontSize.base, color: Colors.text,
+    fontSize: FontSize.base, color: Colors.text, letterSpacing: 0,
   },
   otpInput: { fontSize: FontSize['2xl'], fontWeight: '700' as const, letterSpacing: 8, textAlign: 'center' as const },
 

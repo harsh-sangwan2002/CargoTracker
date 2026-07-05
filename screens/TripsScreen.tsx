@@ -37,6 +37,7 @@ interface Props {
   role: UserRole;
   pendingTripId?: string | null;
   onPendingTripConsumed?: () => void;
+  initialSearch?: string;
 }
 
 const PAGE_SIZE = 20;
@@ -226,14 +227,14 @@ const tripToForm = (t: TripRecord & { id: string }): FormState => ({
 });
 
 /* ─── Main Screen ────────────────────────────────────────────────── */
-export default function TripsScreen({ role, pendingTripId, onPendingTripConsumed }: Props) {
+export default function TripsScreen({ role, pendingTripId, onPendingTripConsumed, initialSearch }: Props) {
   const user = auth.currentUser;
   const [trips, setTrips] = useState<(TripRecord & { id: string })[]>([]);
   const [displayCount, setDisplayCount] = useState(PAGE_SIZE);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [searchQ, setSearchQ] = useState('');
+  const [searchQ, setSearchQ] = useState(initialSearch ?? '');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'delivered'>('all');
 
   const [plantList, setPlantList] = useState<(Plant & { id: string })[]>([]);
@@ -1161,6 +1162,7 @@ const s = {
     color: Colors.text,
     borderWidth: 1.5,
     borderColor: Colors.border,
+    letterSpacing: 0,
   },
 
   filterRow: {
@@ -1259,6 +1261,7 @@ const inp = {
     fontSize: FontSize.base,
     color: Colors.text,
     marginBottom: 0,
+    letterSpacing: 0,
   },
   dropdown: {
     position: 'absolute' as const,

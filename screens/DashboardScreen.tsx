@@ -9,6 +9,7 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import * as Location from 'expo-location';
 import { auth } from '../supabaseConfig';
 import { getTrips, getTripsByUser, subscribeToDriverTrips, TripRecord } from '../services/tripService';
@@ -34,6 +35,7 @@ const startOfDay = (d: Date) => { const n = new Date(d); n.setHours(0, 0, 0, 0);
 const startOfWeek = (d: Date) => { const n = new Date(d); n.setDate(n.getDate() - n.getDay()); n.setHours(0, 0, 0, 0); return n; };
 
 export default function DashboardScreen({ role, onTabPress }: Props) {
+  const navigation = useNavigation<any>();
   const user = auth.currentUser;
   const [trips, setTrips] = useState<(TripRecord & { id: string })[]>([]);
   const [driverCount, setDriverCount] = useState(0);
@@ -192,14 +194,16 @@ export default function DashboardScreen({ role, onTabPress }: Props) {
             <Text style={s.sectionTitle}>Quick Actions</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: Spacing[2] }}>
               {[
-                { label: 'Add Trip', icon: '➕', tab: 'trips' as TabId },
-                { label: 'Reports', icon: '📊', tab: 'analytics' as TabId },
-                { label: 'Manage', icon: '⚙️', tab: 'manage' as TabId },
+                { label: 'Add Trip', icon: '➕', onPress: () => onTabPress('trips' as TabId) },
+                { label: 'All Trips', icon: '🚛', onPress: () => onTabPress('trips' as TabId) },
+                { label: 'Drivers', icon: '👷', onPress: () => navigation.navigate('DriverManagement') },
+                { label: 'Reports', icon: '📊', onPress: () => onTabPress('analytics' as TabId) },
+                { label: 'Manage', icon: '⚙️', onPress: () => onTabPress('manage' as TabId) },
               ].map(item => (
                 <TouchableOpacity
-                  key={item.tab}
+                  key={item.label}
                   style={s.quickBtn}
-                  onPress={() => onTabPress(item.tab)}
+                  onPress={item.onPress}
                   activeOpacity={0.8}
                 >
                   <Text style={s.quickBtnIcon}>{item.icon}</Text>

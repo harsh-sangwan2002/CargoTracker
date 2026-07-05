@@ -85,13 +85,11 @@ Deno.serve(async (req) => {
 
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
-  const { data: profile } = await admin
-    .from('profiles')
-    .select('id')
-    .eq('email', email)
-    .maybeSingle();
+  // Check auth.users directly — more reliable than profiles table
+  const { data: usersPage } = await admin.auth.admin.listUsers({ perPage: 1000 });
+  const authUser = usersPage?.users.find(u => u.email?.toLowerCase() === email);
 
-  if (!profile) {
+  if (!authUser) {
     return new Response(
       JSON.stringify({ error: 'No account found with this email address.' }),
       { status: 404, headers: CORS_HEADERS }

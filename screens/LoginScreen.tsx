@@ -215,6 +215,7 @@ const s = {
     paddingVertical: 14,
     fontSize: FontSize.base,
     color: Colors.text,
+    letterSpacing: 0,
   },
   inputFocused: {
     borderColor: Colors.primary,

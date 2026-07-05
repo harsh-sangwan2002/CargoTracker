@@ -543,7 +543,7 @@ export default function ProfileScreen({ role, profileComplete = true, onProfileS
                 <TouchableOpacity style={s.cancelBtn} onPress={() => { setChangePwModal(false); setCurrentPass(''); setNewPass(''); setConfirmPass(''); }} disabled={changingPw}>
                   <Text style={s.cancelBtnText}>Cancel</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={s.confirmBtn} onPress={handleChangePassword} disabled={changingPw}>
+                <TouchableOpacity style={s.updateBtn} onPress={handleChangePassword} disabled={changingPw}>
                   {changingPw ? <ActivityIndicator color="#fff" size="small" /> : <Text style={s.confirmBtnText}>Update</Text>}
                 </TouchableOpacity>
               </View>
@@ -776,6 +776,13 @@ const s = {
   confirmBtn: {
     flex: 1,
     backgroundColor: Colors.danger,
+    borderRadius: Radius.md,
+    paddingVertical: 14,
+    alignItems: 'center' as const,
+  },
+  updateBtn: {
+    flex: 1,
+    backgroundColor: Colors.primary,
     borderRadius: Radius.md,
     paddingVertical: 14,
     alignItems: 'center' as const,

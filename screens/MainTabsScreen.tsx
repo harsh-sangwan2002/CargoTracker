@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useRoute, useNavigation } from '@react-navigation/native';
 import { auth } from '../supabaseConfig';
 import { getUserProfile } from '../services/userService';
 import { getDriverByUserId, getDriverByEmail, linkDriverToUser } from '../services/driverService';
@@ -33,7 +34,12 @@ const ALL_TABS: Tab[] = [
 ];
 
 export default function MainTabsScreen() {
-  const [activeTab, setActiveTab] = useState<TabId>('home');
+  const route = useRoute<any>();
+  const navigation = useNavigation<any>();
+  const routeParams = route.params as { driverFilter?: string; openTrips?: boolean } | undefined;
+
+  const [activeTab, setActiveTab] = useState<TabId>(routeParams?.openTrips ? 'trips' : 'home');
+  const [driverFilter, setDriverFilter] = useState<string | undefined>(routeParams?.driverFilter);
   const [pendingTripId, setPendingTripId] = useState<string | null>(null);
   const [role, setRole] = useState<UserRole>('driver');
   const [loadingRole, setLoadingRole] = useState(true);
@@ -54,6 +60,15 @@ export default function MainTabsScreen() {
       setLoadingRole(false);
     }).catch(() => setLoadingRole(false));
   }, []);
+
+  // Consume driverFilter / openTrips params from navigation (e.g. from DriverManagement → View Trips)
+  useEffect(() => {
+    if (routeParams?.openTrips) {
+      setActiveTab('trips');
+      setDriverFilter(routeParams.driverFilter);
+      navigation.setParams({ openTrips: undefined, driverFilter: undefined });
+    }
+  }, [routeParams?.openTrips, routeParams?.driverFilter]);
 
   // Register this device for push notifications once we know who's signed in.
   useEffect(() => {
@@ -114,6 +129,7 @@ export default function MainTabsScreen() {
           role={role}
           pendingTripId={pendingTripId}
           onPendingTripConsumed={() => setPendingTripId(null)}
+          initialSearch={driverFilter}
         />
       );
       case 'analytics': return <AnalyticsScreen role={role} />;

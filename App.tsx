@@ -22,7 +22,7 @@ export type RootStackParamList = {
   Login: undefined;
   Register: undefined;
   ForgotPassword: undefined;
-  MainTabs: undefined;
+  MainTabs: { driverFilter?: string; openTrips?: boolean } | undefined;
   DriverManagement: undefined;
   UserManagement: undefined;
   PlantManagement: undefined;

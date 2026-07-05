@@ -777,7 +777,7 @@ const s = {
     borderColor: Colors.border
   },
   driverSearchIcon: {fontSize: 16, marginRight: Spacing[2]},
-  driverSearchInput: {flex: 1, fontSize: FontSize.base, color: Colors.text, paddingVertical: 12},
+  driverSearchInput: {flex: 1, fontSize: FontSize.base, color: Colors.text, paddingVertical: 12, letterSpacing: 0},
   driverFilterArrow: {fontSize: FontSize.sm, color: Colors.textMuted, paddingLeft: Spacing[2]},
   selectedBadge: {
     backgroundColor: Colors.primaryLight,

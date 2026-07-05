@@ -487,6 +487,17 @@ export default function DriverManagementScreen() {
                     {creatingLogin ? <ActivityIndicator color="#fff" size="small" /> : <Text style={dv.editBtnText}>Create Login</Text>}
                   </TouchableOpacity>
                 )}
+                <TouchableOpacity
+                  style={[dv.editBtn, { backgroundColor: Colors.info, marginBottom: Spacing[3] }]}
+                  onPress={() => {
+                    setViewModal(false);
+                    setSelected(null);
+                    navigation.navigate('MainTabs', { driverFilter: selected!.fullName, openTrips: true });
+                  }}
+                  activeOpacity={0.85}
+                >
+                  <Text style={dv.editBtnText}>View Trips</Text>
+                </TouchableOpacity>
                 <View style={dv.btns}>
                   <TouchableOpacity style={dv.editBtn} onPress={() => { setEditForm({ fullName: selected!.fullName, age: selected!.age.toString(), address: selected!.address, aadhaarCard: selected!.aadhaarCard, panCard: selected!.panCard, vehicleOwned: selected!.vehicleOwned ?? '', photoUrl: selected!.photoUrl, email: (selected as any).email ?? '', licenseNumber: selected!.licenseNumber ?? '', licenseExpiry: selected!.licenseExpiry ?? '' }); setIsEditing(true); }} activeOpacity={0.85}>
                     <Text style={dv.editBtnText}>Edit</Text>
@@ -505,7 +516,7 @@ export default function DriverManagementScreen() {
       </Modal>
 
       <Modal visible={!!credentialsModal} transparent animationType="fade" onRequestClose={() => setCredentialsModal(null)}>
-        <View style={m.overlay}>
+        <View style={dv.credOverlay}>
           <View style={dv.credCard}>
             <Text style={dv.credTitle}>{credentialsModal?.linkedExisting ? 'Account Linked' : 'Login Created'}</Text>
             <Text style={dv.credBody}>
@@ -583,6 +594,7 @@ const s = {
     color: Colors.text,
     borderWidth: 1.5,
     borderColor: Colors.border,
+    letterSpacing: 0,
   },
   loaderCenter: { flex: 1, justifyContent: 'center' as const, alignItems: 'center' as const } as const,
   listContent: { paddingHorizontal: Spacing[5], paddingBottom: Spacing[10] } as const,
@@ -669,6 +681,7 @@ const fms = {
     paddingVertical: 12,
     fontSize: FontSize.base,
     color: Colors.text,
+    letterSpacing: 0,
   },
   btns: { flexDirection: 'row' as const, gap: Spacing[3], marginTop: Spacing[4], marginBottom: Spacing[4] },
   cancelBtn: {
@@ -693,6 +706,13 @@ const fms = {
 };
 
 const dv = {
+  credOverlay: {
+    flex: 1,
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    padding: Spacing[5],
+  },
   credCard: {
     width: '100%' as const,
     maxWidth: 420,
