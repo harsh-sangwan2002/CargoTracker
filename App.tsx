@@ -8,6 +8,7 @@ import { initOfflineQueueSync } from './utils/offlineQueue';
 
 import LoginScreen from './screens/LoginScreen';
 import RegisterScreen from './screens/RegisterScreen';
+import ForgotPasswordScreen from './screens/ForgotPasswordScreen';
 import MainTabsScreen from './screens/MainTabsScreen';
 import DriverManagementScreen from './screens/DriverManagementScreen';
 import UserManagementScreen from './screens/UserManagementScreen';
@@ -20,6 +21,7 @@ const Stack = createNativeStackNavigator();
 export type RootStackParamList = {
   Login: undefined;
   Register: undefined;
+  ForgotPassword: undefined;
   MainTabs: undefined;
   DriverManagement: undefined;
   UserManagement: undefined;
@@ -100,6 +102,7 @@ export default function App() {
           <>
             <Stack.Screen name="Login" component={LoginScreen} />
             <Stack.Screen name="Register" component={RegisterScreen} />
+            <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} options={{ animation: 'slide_from_right' }} />
           </>
         )}
       </Stack.Navigator>

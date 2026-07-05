@@ -90,3 +90,28 @@ export const reauthenticateWithPassword = async (email: string, password: string
   const { error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) throw error;
 };
+
+// Sends a 6-digit OTP via Mailgun through the password-otp-send edge function.
+export const sendOtp = async (email: string) => {
+  const { data, error } = await supabase.functions.invoke('password-otp-send', {
+    body: { email },
+  });
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
+};
+
+// Verifies the OTP and resets the password atomically via the password-otp-verify edge function.
+// No active session is required — the edge function uses the service role to update the password.
+export const resetPasswordWithOtp = async (email: string, otp: string, newPassword: string) => {
+  const { data, error } = await supabase.functions.invoke('password-otp-verify', {
+    body: { email, otp, newPassword },
+  });
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
+};
+
+// Used by ProfileScreen change-password (requires an active session).
+export const updatePassword = async (newPassword: string) => {
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) throw error;
+};

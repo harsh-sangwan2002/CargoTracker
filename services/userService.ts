@@ -91,6 +91,73 @@ export const convertImageToBase64 = async (imageUri: string): Promise<string> =>
   }
 };
 
+// ── Staff (admin/manager) extra profile ─────────────────────────────
+// Requires these columns on the profiles table (run once in Supabase SQL editor):
+//   ALTER TABLE profiles ADD COLUMN IF NOT EXISTS full_name TEXT;
+//   ALTER TABLE profiles ADD COLUMN IF NOT EXISTS phone TEXT;
+//   ALTER TABLE profiles ADD COLUMN IF NOT EXISTS address TEXT;
+
+export interface StaffProfile {
+  fullName: string;
+  phone: string;
+  address: string;
+}
+
+export const getStaffProfile = async (uid: string): Promise<StaffProfile | null> => {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('full_name, phone, address')
+    .eq('id', uid)
+    .maybeSingle();
+  if (error || !data) return null;
+  return {
+    fullName: data.full_name ?? '',
+    phone: data.phone ?? '',
+    address: data.address ?? '',
+  };
+};
+
+export const upsertStaffProfile = async (uid: string, profile: StaffProfile) => {
+  const { error } = await supabase
+    .from('profiles')
+    .update({ full_name: profile.fullName, phone: profile.phone, address: profile.address })
+    .eq('id', uid);
+  if (error) throw error;
+};
+
+// ── Seed test manager accounts ───────────────────────────────────────
+// Requires email confirmation to be disabled in Supabase Auth settings,
+// or the accounts can be confirmed manually via the Supabase dashboard.
+const TEST_MANAGERS = [
+  { email: 'manager1@cargotracker.com', password: 'Manager@123', name: 'Priya Sharma' },
+  { email: 'manager2@cargotracker.com', password: 'Manager@123', name: 'Rahul Verma' },
+];
+
+export const seedManagerAccounts = async (): Promise<{ email: string; status: string }[]> => {
+  const results: { email: string; status: string }[] = [];
+  for (const m of TEST_MANAGERS) {
+    try {
+      const { data, error } = await supabase.auth.signUp({ email: m.email, password: m.password });
+      if (error) {
+        if (error.message?.toLowerCase().includes('already registered')) {
+          results.push({ email: m.email, status: 'already exists' });
+        } else {
+          results.push({ email: m.email, status: `failed: ${error.message}` });
+        }
+        continue;
+      }
+      const uid = data.user?.id;
+      if (uid) {
+        await supabase.from('profiles').upsert({ id: uid, email: m.email, role: 'manager', full_name: m.name });
+      }
+      results.push({ email: m.email, status: 'created' });
+    } catch (e: any) {
+      results.push({ email: m.email, status: `error: ${e.message}` });
+    }
+  }
+  return results;
+};
+
 export const deleteUserAccountData = async (uid: string) => {
   const driversList = await getDrivers(uid);
   const driverIds = driversList.map(d => d.id);

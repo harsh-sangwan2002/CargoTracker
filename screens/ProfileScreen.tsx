@@ -14,8 +14,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-import { auth, reauthenticateWithPassword, signOut } from '../supabaseConfig';
-import { deleteUserAccountData } from '../services/userService';
+import { auth, reauthenticateWithPassword, signOut, updatePassword } from '../supabaseConfig';
+import { deleteUserAccountData, getStaffProfile, upsertStaffProfile, seedManagerAccounts, StaffProfile } from '../services/userService';
 import { getDriverByUserId, getDriverByEmail, addDriver, updateDriver, Driver } from '../services/driverService';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
 import type { UserRole } from './MainTabsScreen';
@@ -52,9 +52,37 @@ export default function ProfileScreen({ role, profileComplete = true, onProfileS
   const [loadingProfile, setLoadingProfile] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
 
+  // Staff (admin/manager) profile state
+  const [staffProfile, setStaffProfile] = useState<StaffProfile | null>(null);
+  const [staffForm, setStaffForm] = useState<StaffProfile>({ fullName: '', phone: '', address: '' });
+  const [editingStaff, setEditingStaff] = useState(false);
+  const [loadingStaff, setLoadingStaff] = useState(false);
+  const [savingStaff, setSavingStaff] = useState(false);
+
+  // Change password state
+  const [changePwModal, setChangePwModal] = useState(false);
+  const [currentPass, setCurrentPass] = useState('');
+  const [newPass, setNewPass] = useState('');
+  const [confirmPass, setConfirmPass] = useState('');
+  const [changingPw, setChangingPw] = useState(false);
+
+  // Seed managers state
+  const [seeding, setSeeding] = useState(false);
+
   const roleLabel = role === 'admin' ? 'Admin' : role === 'manager' ? 'Manager' : 'Driver';
   const roleColor = role === 'admin' ? Colors.roleAdmin : role === 'manager' ? Colors.roleManager : Colors.roleDriver;
   const roleLight = role === 'admin' ? Colors.roleAdminLight : role === 'manager' ? Colors.roleManagerLight : Colors.roleDriverLight;
+
+  useEffect(() => {
+    if (role === 'driver' || !user?.uid) return;
+    setLoadingStaff(true);
+    getStaffProfile(user.uid)
+      .then(p => {
+        if (p) { setStaffProfile(p); setStaffForm(p); }
+      })
+      .catch(() => {})
+      .finally(() => setLoadingStaff(false));
+  }, [role]);
 
   useEffect(() => {
     if (role !== 'driver' || !user?.uid) return;
@@ -143,6 +171,66 @@ export default function ProfileScreen({ role, profileComplete = true, onProfileS
     } finally {
       setSavingProfile(false);
     }
+  };
+
+  const handleSaveStaffProfile = async () => {
+    if (!staffForm.fullName.trim()) { Alert.alert('Required', 'Full name is required.'); return; }
+    if (!user?.uid) return;
+    setSavingStaff(true);
+    try {
+      await upsertStaffProfile(user.uid, staffForm);
+      setStaffProfile({ ...staffForm });
+      setEditingStaff(false);
+      Alert.alert('Saved', 'Your profile has been updated.');
+    } catch {
+      Alert.alert('Error', 'Failed to save profile. Make sure the database columns exist (see userService.ts comments).');
+    } finally {
+      setSavingStaff(false);
+    }
+  };
+
+  const handleChangePassword = async () => {
+    if (!currentPass.trim()) { Alert.alert('Required', 'Enter your current password.'); return; }
+    if (newPass.length < 6) { Alert.alert('Weak Password', 'New password must be at least 6 characters.'); return; }
+    if (newPass !== confirmPass) { Alert.alert('Mismatch', 'New passwords do not match.'); return; }
+    if (!user?.email) return;
+    setChangingPw(true);
+    try {
+      await reauthenticateWithPassword(user.email, currentPass);
+      await updatePassword(newPass);
+      setChangePwModal(false);
+      setCurrentPass(''); setNewPass(''); setConfirmPass('');
+      Alert.alert('Done', 'Password changed successfully.');
+    } catch (err: any) {
+      const msg = (err.message ?? '').toLowerCase();
+      Alert.alert('Error', msg.includes('invalid') ? 'Current password is incorrect.' : err.message || 'Failed to change password.');
+    } finally {
+      setChangingPw(false);
+    }
+  };
+
+  const handleSeedManagers = async () => {
+    Alert.alert(
+      'Seed Manager Accounts',
+      'This will create:\n• manager1@cargotracker.com\n• manager2@cargotracker.com\n\nPassword: Manager@123\n\nNote: Requires email confirmation to be OFF in Supabase Auth settings.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Create', onPress: async () => {
+            setSeeding(true);
+            try {
+              const results = await seedManagerAccounts();
+              const summary = results.map(r => `${r.email}: ${r.status}`).join('\n');
+              Alert.alert('Seeding Complete', summary);
+            } catch {
+              Alert.alert('Error', 'Failed to seed accounts.');
+            } finally {
+              setSeeding(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleLogout = () => {
@@ -289,26 +377,119 @@ export default function ProfileScreen({ role, profileComplete = true, onProfileS
           </View>
         )}
 
-        {/* Account Info (non-driver or always show for all) */}
+        {/* Admin / Manager Profile Section */}
         {role !== 'driver' && (
           <View style={s.section}>
-            <Text style={s.sectionTitle}>Account</Text>
-            <View style={s.infoCard}>
-              <View style={s.infoRow}>
-                <Text style={s.infoLabel}>Email</Text>
-                <Text style={s.infoValue} numberOfLines={1}>{user?.email}</Text>
-              </View>
-              <View style={[s.infoRow, { borderBottomWidth: 0 }]}>
-                <Text style={s.infoLabel}>Role</Text>
-                <Text style={[s.infoValue, { color: roleColor, fontWeight: '700' as const }]}>{roleLabel}</Text>
-              </View>
+            <View style={s.sectionHeader}>
+              <Text style={s.sectionTitle}>Profile Details</Text>
+              {staffProfile && !editingStaff && (
+                <TouchableOpacity onPress={() => setEditingStaff(true)} activeOpacity={0.7}>
+                  <Text style={s.editLink}>Edit</Text>
+                </TouchableOpacity>
+              )}
             </View>
+
+            {loadingStaff ? (
+              <ActivityIndicator color={Colors.primary} style={{ marginVertical: Spacing[4] }} />
+            ) : editingStaff || !staffProfile ? (
+              <View style={s.profileCard}>
+                {([
+                  { key: 'fullName' as const, label: 'Full Name *', placeholder: 'Your full name', autoCapitalize: 'words' as const },
+                  { key: 'phone' as const, label: 'Phone', placeholder: '+91 98765 43210', keyboardType: 'phone-pad' as const },
+                ] as const).map(field => (
+                  <View key={field.key} style={s.formRow}>
+                    <Text style={s.formLabel}>{field.label}</Text>
+                    <TextInput
+                      style={s.formInput}
+                      value={staffForm[field.key]}
+                      onChangeText={v => setStaffForm(p => ({ ...p, [field.key]: v }))}
+                      placeholder={field.placeholder}
+                      placeholderTextColor={Colors.textMuted}
+                      autoCapitalize={(field as any).autoCapitalize ?? 'none'}
+                      keyboardType={(field as any).keyboardType ?? 'default'}
+                    />
+                  </View>
+                ))}
+                <View style={s.formRow}>
+                  <Text style={s.formLabel}>Address</Text>
+                  <TextInput
+                    style={[s.formInput, { height: 80, textAlignVertical: 'top' }]}
+                    value={staffForm.address}
+                    onChangeText={v => setStaffForm(p => ({ ...p, address: v }))}
+                    multiline numberOfLines={3}
+                    placeholder="Office / home address"
+                    placeholderTextColor={Colors.textMuted}
+                    autoCapitalize="sentences"
+                  />
+                </View>
+                <View style={s.formRow}>
+                  <Text style={s.formLabel}>Email</Text>
+                  <TextInput style={[s.formInput, s.formInputReadonly]} value={user?.email ?? ''} editable={false} />
+                </View>
+                <View style={s.formBtns}>
+                  {staffProfile && (
+                    <TouchableOpacity style={s.cancelFormBtn} onPress={() => setEditingStaff(false)} disabled={savingStaff}>
+                      <Text style={s.cancelFormBtnText}>Cancel</Text>
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity
+                    style={[s.saveFormBtn, !staffProfile && { flex: 1 }]}
+                    onPress={handleSaveStaffProfile}
+                    disabled={savingStaff}
+                    activeOpacity={0.85}
+                  >
+                    {savingStaff
+                      ? <ActivityIndicator color="#fff" size="small" />
+                      : <Text style={s.saveFormBtnText}>{staffProfile ? 'Save Changes' : 'Save Profile'}</Text>}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <View style={s.infoCard}>
+                {[
+                  { label: 'Full Name', value: staffProfile.fullName },
+                  { label: 'Phone', value: staffProfile.phone },
+                  { label: 'Email', value: user?.email ?? '' },
+                  { label: 'Role', value: roleLabel },
+                ].map((row, i, arr) => (
+                  <View key={row.label} style={[s.infoRow, i === arr.length - 1 && { borderBottomWidth: 0 }]}>
+                    <Text style={s.infoLabel}>{row.label}</Text>
+                    <Text style={[s.infoValue, row.label === 'Role' && { color: roleColor, fontWeight: '700' as const }]}>{row.value || '—'}</Text>
+                  </View>
+                ))}
+                {!!staffProfile.address && (
+                  <View style={[s.infoRow, { borderBottomWidth: 0, flexDirection: 'column' as const, alignItems: 'flex-start' as const }]}>
+                    <Text style={[s.infoLabel, { marginBottom: Spacing[1] }]}>Address</Text>
+                    <Text style={[s.infoValue, { maxWidth: '100%' as const }]}>{staffProfile.address}</Text>
+                  </View>
+                )}
+              </View>
+            )}
+
+            {/* Add details prompt when no profile yet */}
+            {!staffProfile && !editingStaff && !loadingStaff && (
+              <TouchableOpacity style={s.addDetailsBtn} onPress={() => setEditingStaff(true)} activeOpacity={0.85}>
+                <Text style={s.addDetailsBtnText}>+ Add Profile Details</Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
 
         {/* Actions */}
         <View style={s.section}>
           <Text style={s.sectionTitle}>Actions</Text>
+          <TouchableOpacity style={s.actionBtn} onPress={() => setChangePwModal(true)} activeOpacity={0.8}>
+            <Text style={s.actionIcon}>🔑</Text>
+            <Text style={s.actionLabel}>Change Password</Text>
+            <Text style={s.actionArrow}>›</Text>
+          </TouchableOpacity>
+          {role === 'admin' && (
+            <TouchableOpacity style={s.actionBtn} onPress={handleSeedManagers} activeOpacity={0.8} disabled={seeding}>
+              <Text style={s.actionIcon}>👥</Text>
+              <Text style={s.actionLabel}>{seeding ? 'Creating Managers...' : 'Seed Test Managers'}</Text>
+              {seeding ? <ActivityIndicator size="small" color={Colors.primary} /> : <Text style={s.actionArrow}>›</Text>}
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={s.actionBtn} onPress={handleLogout} activeOpacity={0.8}>
             <Text style={s.actionIcon}>🚪</Text>
             <Text style={s.actionLabel}>Sign Out</Text>
@@ -334,6 +515,42 @@ export default function ProfileScreen({ role, profileComplete = true, onProfileS
           </TouchableOpacity>
         </View>
       </ScrollView>
+
+      {/* Change Password Modal */}
+      <Modal visible={changePwModal} transparent animationType="fade" onRequestClose={() => !changingPw && setChangePwModal(false)}>
+        <KeyboardAvoidingView style={s.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+          <Pressable style={s.modalOverlay} onPress={() => !changingPw && setChangePwModal(false)}>
+            <View style={s.modalCard} onStartShouldSetResponder={() => true}>
+              <Text style={s.modalTitle}>Change Password</Text>
+              <Text style={s.modalSub}>Enter your current password, then choose a new one.</Text>
+              {[
+                { placeholder: 'Current password', value: currentPass, onChange: setCurrentPass },
+                { placeholder: 'New password (min 6 chars)', value: newPass, onChange: setNewPass },
+                { placeholder: 'Confirm new password', value: confirmPass, onChange: setConfirmPass },
+              ].map((f, i) => (
+                <TextInput
+                  key={i}
+                  style={[s.modalInput, i < 2 && { marginBottom: Spacing[3] }]}
+                  placeholder={f.placeholder}
+                  placeholderTextColor={Colors.textMuted}
+                  value={f.value}
+                  onChangeText={f.onChange}
+                  secureTextEntry
+                  editable={!changingPw}
+                />
+              ))}
+              <View style={[s.modalBtns, { marginTop: Spacing[4] }]}>
+                <TouchableOpacity style={s.cancelBtn} onPress={() => { setChangePwModal(false); setCurrentPass(''); setNewPass(''); setConfirmPass(''); }} disabled={changingPw}>
+                  <Text style={s.cancelBtnText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={s.confirmBtn} onPress={handleChangePassword} disabled={changingPw}>
+                  {changingPw ? <ActivityIndicator color="#fff" size="small" /> : <Text style={s.confirmBtnText}>Update</Text>}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </Pressable>
+        </KeyboardAvoidingView>
+      </Modal>
 
       {/* Delete App Data Modal */}
       <Modal visible={deleteModal} transparent animationType="fade" onRequestClose={() => !deleting && setDeleteModal(false)}>
@@ -491,6 +708,18 @@ const s = {
     alignItems: 'center' as const,
   },
   saveFormBtnText: { color: '#fff', fontWeight: '700' as const, fontSize: FontSize.base },
+
+  addDetailsBtn: {
+    backgroundColor: Colors.primaryLight,
+    borderRadius: Radius.md,
+    paddingVertical: 14,
+    alignItems: 'center' as const,
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+    borderStyle: 'dashed' as const,
+    marginTop: Spacing[2],
+  },
+  addDetailsBtnText: { color: Colors.primary, fontWeight: '700' as const, fontSize: FontSize.base },
 
   actionBtn: {
     flexDirection: 'row' as const,
