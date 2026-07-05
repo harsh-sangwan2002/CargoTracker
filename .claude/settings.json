@@ -11,7 +11,14 @@
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
       "Bash(git push *)",
-      "Bash(npx eas-cli *)"
+      "Bash(npx eas-cli *)",
+      "Bash(npx jest *)",
+      "Bash(node -e \"require\\('ts-jest'\\); console.log\\('ts-jest ok'\\)\")",
+      "Bash(node -e \"console.log\\('jest:', require\\('jest/package.json'\\).version, 'ts-jest:', require\\('ts-jest/package.json'\\).version\\)\")",
+      "Bash(brew --version)",
+      "Bash(supabase functions *)",
+      "Bash(curl -s -X POST https://jlagdydxwxvjyyxxqykm.supabase.co/functions/v1/password-otp-send -H 'Authorization: Bearer sb_publishable_Cofh-Ejm0KSxrMSVqi7dWg_9dfA33gZ' -H 'Content-Type: application/json' -d '{\"email\":\"asangwan8998@gmail.com\"}')",
+      "Bash(curl -s -X POST https://jlagdydxwxvjyyxxqykm.supabase.co/functions/v1/password-otp-send -H 'Authorization: Bearer sb_publishable_Cofh-Ejm0KSxrMSVqi7dWg_9dfA33gZ' -H 'Content-Type: application/json' -d '{\"email\":\"manager1@cargotracker.com\"}')"
     ]
   }
 }
