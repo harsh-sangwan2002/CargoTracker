@@ -74,7 +74,7 @@ export default function ForgotPasswordScreen() {
   const stepActions: Record<Step, { title: string; sub: string; btnLabel: string; onPress: () => void }> = {
     email: {
       title: 'Forgot Password',
-      sub: "Enter your registered email. We'll send a 6-digit code via Mailgun.",
+      sub: "Enter your registered email. We'll send you a 6-digit reset code.",
       btnLabel: 'Send Code',
       onPress: handleSendOtp,
     },

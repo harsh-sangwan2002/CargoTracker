@@ -1,12 +1,12 @@
 // Deploy: supabase functions deploy password-otp-send
 // Secrets required (supabase secrets set):
-//   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, MAILGUN_API_KEY, MAILGUN_DOMAIN
+//   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, RESEND_API_KEY, RESEND_FROM_EMAIL
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-const MAILGUN_API_KEY = Deno.env.get('MAILGUN_API_KEY')!;
-const MAILGUN_DOMAIN = Deno.env.get('MAILGUN_DOMAIN')!;
+const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')!;
+const RESEND_FROM_EMAIL = Deno.env.get('RESEND_FROM_EMAIL')!;
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -17,7 +17,6 @@ const CORS_HEADERS = {
 function generateOtp(): string {
   const arr = new Uint32Array(1);
   crypto.getRandomValues(arr);
-  // Range 100000–999999 ensures always 6 digits
   return String((arr[0] % 900000) + 100000);
 }
 
@@ -29,39 +28,40 @@ async function hashOtp(otp: string): Promise<string> {
     .join('');
 }
 
-async function sendMailgunEmail(to: string, otp: string): Promise<void> {
-  const form = new FormData();
-  form.append('from', `Cargo Tracker <noreply@${MAILGUN_DOMAIN}>`);
-  form.append('to', to);
-  form.append('subject', 'Your Password Reset Code - Cargo Tracker');
-  form.append('html', `
-    <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;">
-      <h2 style="color:#1e293b;margin-bottom:8px;">Password Reset</h2>
-      <p style="color:#475569;margin-bottom:24px;">
-        Enter this code in the Cargo Tracker app to reset your password.
-        It expires in <strong>10 minutes</strong>.
-      </p>
-      <div style="background:#f1f5f9;border-radius:12px;padding:24px;text-align:center;margin-bottom:24px;">
-        <span style="font-size:48px;font-weight:800;letter-spacing:16px;color:#0f172a;">
-          ${otp}
-        </span>
-      </div>
-      <p style="color:#94a3b8;font-size:13px;">
-        If you didn't request a password reset, you can safely ignore this email.
-      </p>
-    </div>
-  `);
-
-  const credentials = btoa(`api:${MAILGUN_API_KEY}`);
-  const res = await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, {
+async function sendResendEmail(to: string, otp: string): Promise<void> {
+  const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
-    headers: { Authorization: `Basic ${credentials}` },
-    body: form,
+    headers: {
+      Authorization: `Bearer ${RESEND_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: `Cargo Tracker <${RESEND_FROM_EMAIL}>`,
+      to: [to],
+      subject: 'Your Password Reset Code - Cargo Tracker',
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;">
+          <h2 style="color:#1e293b;margin-bottom:8px;">Password Reset</h2>
+          <p style="color:#475569;margin-bottom:24px;">
+            Enter this code in the Cargo Tracker app to reset your password.
+            It expires in <strong>10 minutes</strong>.
+          </p>
+          <div style="background:#f1f5f9;border-radius:12px;padding:24px;text-align:center;margin-bottom:24px;">
+            <span style="font-size:48px;font-weight:800;letter-spacing:16px;color:#0f172a;">
+              ${otp}
+            </span>
+          </div>
+          <p style="color:#94a3b8;font-size:13px;">
+            If you didn't request a password reset, you can safely ignore this email.
+          </p>
+        </div>
+      `,
+    }),
   });
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Mailgun ${res.status}: ${text}`);
+    throw new Error(`Resend ${res.status}: ${text}`);
   }
 }
 
@@ -121,7 +121,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    await sendMailgunEmail(email, otp);
+    await sendResendEmail(email, otp);
   } catch (e) {
     return new Response(
       JSON.stringify({ error: `Failed to send email: ${(e as Error).message}` }),
