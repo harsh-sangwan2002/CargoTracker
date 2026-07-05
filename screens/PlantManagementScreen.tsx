@@ -322,6 +322,7 @@ const s = {
     color: Colors.text,
     borderWidth: 1.5,
     borderColor: Colors.border,
+    letterSpacing: 0,
   },
 
   loaderCenter: { flex: 1, justifyContent: 'center' as const, alignItems: 'center' as const } as const,
@@ -404,6 +405,7 @@ const m = {
     paddingVertical: 14,
     fontSize: FontSize.base,
     color: Colors.text,
+    letterSpacing: 0,
     marginBottom: Spacing[4],
   },
   btns: { flexDirection: 'row' as const, gap: Spacing[3], marginTop: Spacing[2] },

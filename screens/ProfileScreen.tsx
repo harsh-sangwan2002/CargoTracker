@@ -681,6 +681,7 @@ const s = {
     paddingVertical: 12,
     fontSize: FontSize.base,
     color: Colors.text,
+    letterSpacing: 0,
   },
   formInputReadonly: {
     opacity: 0.6,
@@ -760,6 +761,7 @@ const s = {
     paddingVertical: 14,
     fontSize: FontSize.base,
     color: Colors.text,
+    letterSpacing: 0,
     marginBottom: Spacing[4],
   },
   modalBtns: { flexDirection: 'row' as const, gap: Spacing[3] },

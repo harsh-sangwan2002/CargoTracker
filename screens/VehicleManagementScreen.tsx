@@ -625,6 +625,7 @@ const s = {
     color: Colors.text,
     borderWidth: 1.5,
     borderColor: Colors.border,
+    letterSpacing: 0,
   },
 
   listContent: { paddingHorizontal: Spacing[5], paddingBottom: Spacing[10] } as const,
@@ -707,6 +708,7 @@ const m = {
     paddingVertical: 14,
     fontSize: FontSize.base,
     color: Colors.text,
+    letterSpacing: 0,
     marginBottom: Spacing[4],
   },
   btns: { flexDirection: 'row' as const, gap: Spacing[3], marginTop: Spacing[2] },
