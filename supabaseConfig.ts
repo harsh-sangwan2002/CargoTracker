@@ -2,12 +2,14 @@ import 'react-native-url-polyfill/auto';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient, Session, User } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
-
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error('Missing EXPO_PUBLIC_SUPABASE_URL or EXPO_PUBLIC_SUPABASE_ANON_KEY in .env');
-}
+// Supabase URL and anon/publishable key are safe to ship in the client bundle —
+// they are not secrets; access control is enforced server-side via Row Level
+// Security. Hardcoded here (with env override) so the app never depends on
+// EXPO_PUBLIC_* vars being embedded correctly by every build path (some local/
+// CI Android builds don't pick up .env, which previously crashed the app on
+// launch with a blank screen).
+const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://jlagdydxwxvjyyxxqykm.supabase.co';
+const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'sb_publishable_Cofh-Ejm0KSxrMSVqi7dWg_9dfA33gZ';
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
