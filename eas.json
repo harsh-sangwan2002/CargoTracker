@@ -24,7 +24,7 @@
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_Cofh-Ejm0KSxrMSVqi7dWg_9dfA33gZ"
       },
       "ios": { "buildConfiguration": "Release", "autoIncrement": true },
-      "android": { "buildType": "app-bundle" }
+      "android": { "buildType": "app-bundle", "autoIncrement": true }
     }
   },
   "submit": {
