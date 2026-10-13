@@ -1,7 +1,13 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npx eas-cli *)"
+      "Bash(npx eas-cli *)",
+      "Read(//opt/homebrew/opt/**)",
+      "Bash(npm view *)",
+      "Bash(docker info *)",
+      "Bash(SCHEMA=/Users/harshsangwan/Desktop/CargoTracker/supabase/schema.sql node --test --test-reporter=spec schema.integration.test.mjs)",
+      "Bash(grep -v -E \"^\\\\s+at |node:internal|^\\\\s*$\")",
+      "Bash(echo \"exit=$?\")"
     ]
   }
 }
