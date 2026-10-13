@@ -18,7 +18,9 @@
       "Bash(brew --version)",
       "Bash(supabase functions *)",
       "Bash(curl -s -X POST https://jlagdydxwxvjyyxxqykm.supabase.co/functions/v1/password-otp-send -H 'Authorization: Bearer sb_publishable_Cofh-Ejm0KSxrMSVqi7dWg_9dfA33gZ' -H 'Content-Type: application/json' -d '{\"email\":\"asangwan8998@gmail.com\"}')",
-      "Bash(curl -s -X POST https://jlagdydxwxvjyyxxqykm.supabase.co/functions/v1/password-otp-send -H 'Authorization: Bearer sb_publishable_Cofh-Ejm0KSxrMSVqi7dWg_9dfA33gZ' -H 'Content-Type: application/json' -d '{\"email\":\"manager1@cargotracker.com\"}')"
+      "Bash(curl -s -X POST https://jlagdydxwxvjyyxxqykm.supabase.co/functions/v1/password-otp-send -H 'Authorization: Bearer sb_publishable_Cofh-Ejm0KSxrMSVqi7dWg_9dfA33gZ' -H 'Content-Type: application/json' -d '{\"email\":\"manager1@cargotracker.com\"}')",
+      "Bash(cd /Users/harshsangwan/Desktop/CargoTracker/android && grep -n -A12 \"signingConfigs\" app/build.gradle; grep -n \"versionCode\\\\|versionName\" app/build.gradle; ls app/*.keystore app/*.jks 2>/dev/null; grep -i \"UPLOAD\\\\|STORE\" gradle.properties; cat ../.gitignore 2>/dev/null | grep -i android)",
+      "Read(//Users/harshsangwan/Desktop/**)"
     ]
   }
 }
