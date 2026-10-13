@@ -22,7 +22,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { auth } from '../supabaseConfig';
 import { getDrivers, addDriver, updateDriver, deleteDriver, createDriverAccount, getDriverByEmail, Driver } from '../services/driverService';
-import { convertImageToBase64 } from '../services/userService';
+import { convertImageToBase64, isAdmin } from '../services/userService';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
 import { ShimmerRow } from '../components/Shimmer';
 
@@ -49,9 +49,18 @@ interface DriverFormProps {
   submitLabel: string;
   saving: boolean;
   onPickImage: (isEdit: boolean) => void;
+  hideIdFields?: boolean;
 }
 
-function DriverForm({ f, setF, onSave, onCancel, submitLabel, saving, onPickImage }: DriverFormProps) {
+// Aadhaar/PAN are visible to admins only (HLD §3.6); managers can't view or edit them.
+const ID_FIELDS = ['aadhaarCard', 'panCard'];
+
+export const maskId = (value?: string) => {
+  const v = (value ?? '').replace(/\s/g, '');
+  return v.length > 4 ? `${'•'.repeat(v.length - 4)}${v.slice(-4)}` : v;
+};
+
+function DriverForm({ f, setF, onSave, onCancel, submitLabel, saving, onPickImage, hideIdFields }: DriverFormProps) {
   return (
     <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
       <TouchableOpacity style={fms.photoBtn} onPress={() => onPickImage(submitLabel === 'Save Changes')} activeOpacity={0.8}>
@@ -74,7 +83,7 @@ function DriverForm({ f, setF, onSave, onCancel, submitLabel, saving, onPickImag
         { key: 'panCard', label: 'PAN Card *', autoCapitalize: 'characters' as const, maxLength: 10, placeholder: 'ABCDE1234F' },
         { key: 'licenseNumber', label: 'License Number (optional)', autoCapitalize: 'characters' as const, placeholder: 'DL-1420110012345' },
         { key: 'licenseExpiry', label: 'License Expiry (optional, YYYY-MM-DD)', placeholder: '2027-01-31' },
-      ].map(field => (
+      ].filter(field => !(hideIdFields && ID_FIELDS.includes(field.key))).map(field => (
         <View key={field.key} style={{ marginBottom: Spacing[3] }}>
           <Text style={fms.label}>{field.label}</Text>
           <TextInput
@@ -131,6 +140,11 @@ export default function DriverManagementScreen() {
   const [form, setForm] = useState(emptyForm);
   const [editForm, setEditForm] = useState(emptyForm);
   const [credentialsModal, setCredentialsModal] = useState<{ email: string; password?: string; linkedExisting?: boolean } | null>(null);
+  const [userIsAdmin, setUserIsAdmin] = useState(false);
+
+  useEffect(() => {
+    if (user?.uid) isAdmin(user.uid).then(setUserIsAdmin).catch(() => {});
+  }, []);
 
   const addSwipeY = useRef(new Animated.Value(0)).current;
   const addModalPan = useRef(PanResponder.create({
@@ -210,11 +224,12 @@ export default function DriverManagementScreen() {
     }
   };
 
-  const validate = (f: typeof emptyForm) => {
-    if (!f.fullName.trim() || !f.age.trim() || !f.address.trim() || !f.aadhaarCard.trim() || !f.panCard.trim() || !f.vehicleOwned.trim()) return 'Please fill all required fields.';
+  const validate = (f: typeof emptyForm, skipIdFields = false) => {
+    if (!f.fullName.trim() || !f.age.trim() || !f.address.trim() || !f.vehicleOwned.trim()) return 'Please fill all required fields.';
+    if (!skipIdFields && (!f.aadhaarCard.trim() || !f.panCard.trim())) return 'Please fill all required fields.';
     if (!/^\d+$/.test(f.age) || parseInt(f.age) < 18 || parseInt(f.age) > 80) return 'Age must be between 18 and 80.';
-    if (!/^\d{12}$/.test(f.aadhaarCard.replace(/\s/g, ''))) return 'Aadhaar must be exactly 12 digits.';
-    if (!/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(f.panCard.toUpperCase())) return 'Invalid PAN card format (e.g. ABCDE1234F).';
+    if (!skipIdFields && !/^\d{12}$/.test(f.aadhaarCard.replace(/\s/g, ''))) return 'Aadhaar must be exactly 12 digits.';
+    if (!skipIdFields && !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(f.panCard.toUpperCase())) return 'Invalid PAN card format (e.g. ABCDE1234F).';
     if (f.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email.trim())) return 'Invalid email address.';
     if (f.licenseExpiry.trim() && !/^\d{4}-\d{2}-\d{2}$/.test(f.licenseExpiry.trim())) return 'License expiry must be in YYYY-MM-DD format.';
     return null;
@@ -258,7 +273,7 @@ export default function DriverManagementScreen() {
 
   const handleSaveEdit = async () => {
     if (!selected) return;
-    const err = validate(editForm);
+    const err = validate(editForm, !userIsAdmin);
     if (err) { Alert.alert('Validation Error', err); return; }
     setSaving(true);
     try {
@@ -266,8 +281,9 @@ export default function DriverManagementScreen() {
         fullName: editForm.fullName.trim(),
         age: parseInt(editForm.age),
         address: editForm.address.trim(),
-        aadhaarCard: editForm.aadhaarCard.trim(),
-        panCard: editForm.panCard.trim().toUpperCase(),
+        // left undefined (unchanged) for managers, who can't see these fields
+        aadhaarCard: userIsAdmin ? editForm.aadhaarCard.trim() : undefined,
+        panCard: userIsAdmin ? editForm.panCard.trim().toUpperCase() : undefined,
         vehicleOwned: editForm.vehicleOwned.trim().toUpperCase(),
         photoUrl: editForm.photoUrl || selected.photoUrl,
         email: editForm.email.trim().toLowerCase(),
@@ -443,6 +459,7 @@ export default function DriverManagementScreen() {
                 submitLabel="Save Changes"
                 saving={saving}
                 onPickImage={pickImage}
+                hideIdFields={!userIsAdmin}
               />
             ) : (
               <ScrollView showsVerticalScrollIndicator={false}>
@@ -458,8 +475,8 @@ export default function DriverManagementScreen() {
                   { label: 'Age', value: selected?.age?.toString() },
                   { label: 'Vehicle', value: selected?.vehicleOwned },
                   { label: 'Address', value: selected?.address },
-                  { label: 'Aadhaar', value: selected?.aadhaarCard },
-                  { label: 'PAN Card', value: selected?.panCard },
+                  { label: 'Aadhaar', value: userIsAdmin ? selected?.aadhaarCard : maskId(selected?.aadhaarCard) },
+                  { label: 'PAN Card', value: userIsAdmin ? selected?.panCard : maskId(selected?.panCard) },
                   { label: 'License No.', value: selected?.licenseNumber },
                   { label: 'License Expiry', value: selected?.licenseExpiry },
                   { label: 'Email', value: (selected as any)?.email || '—' },
@@ -477,7 +494,7 @@ export default function DriverManagementScreen() {
                     </Text>
                   </View>
                 </View>
-                {!selected?.userId && (
+                {!selected?.userId && userIsAdmin && (
                   <TouchableOpacity
                     style={[dv.editBtn, { backgroundColor: Colors.success, marginBottom: Spacing[3] }]}
                     onPress={handleCreateLogin}
@@ -499,7 +516,7 @@ export default function DriverManagementScreen() {
                   <Text style={dv.editBtnText}>View Trips</Text>
                 </TouchableOpacity>
                 <View style={dv.btns}>
-                  <TouchableOpacity style={dv.editBtn} onPress={() => { setEditForm({ fullName: selected!.fullName, age: selected!.age.toString(), address: selected!.address, aadhaarCard: selected!.aadhaarCard, panCard: selected!.panCard, vehicleOwned: selected!.vehicleOwned ?? '', photoUrl: selected!.photoUrl, email: (selected as any).email ?? '', licenseNumber: selected!.licenseNumber ?? '', licenseExpiry: selected!.licenseExpiry ?? '' }); setIsEditing(true); }} activeOpacity={0.85}>
+                  <TouchableOpacity style={dv.editBtn} onPress={() => { setEditForm({ fullName: selected!.fullName, age: selected!.age.toString(), address: selected!.address, aadhaarCard: userIsAdmin ? selected!.aadhaarCard : '', panCard: userIsAdmin ? selected!.panCard : '', vehicleOwned: selected!.vehicleOwned ?? '', photoUrl: selected!.photoUrl, email: (selected as any).email ?? '', licenseNumber: selected!.licenseNumber ?? '', licenseExpiry: selected!.licenseExpiry ?? '' }); setIsEditing(true); }} activeOpacity={0.85}>
                     <Text style={dv.editBtnText}>Edit</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={dv.deleteBtn} onPress={handleDelete} activeOpacity={0.85}>

@@ -28,12 +28,9 @@ export default function ForgotPasswordScreen() {
       await sendOtp(email.trim().toLowerCase());
       setStep('otp');
     } catch (err: any) {
-      const msg: string = err.message ?? '';
-      if (msg.toLowerCase().includes('not found') || msg.toLowerCase().includes('no account')) {
-        Alert.alert('Not Found', 'No account found with this email address.');
-      } else {
-        Alert.alert('Error', msg || 'Failed to send OTP. Check your email and try again.');
-      }
+      // The server doesn't reveal whether an email is registered; errors here are
+      // rate limits or delivery failures.
+      Alert.alert('Error', err?.message || 'Failed to send the code. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -80,7 +77,7 @@ export default function ForgotPasswordScreen() {
     },
     otp: {
       title: 'Enter Code',
-      sub: `A 6-digit code was sent to ${email}. Check your inbox (and spam folder).`,
+      sub: `If ${email} is registered, a 6-digit code is on its way. Check your inbox (and spam folder).`,
       btnLabel: 'Next',
       onPress: handleOtpNext,
     },

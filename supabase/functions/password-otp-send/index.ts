@@ -85,15 +85,31 @@ Deno.serve(async (req) => {
 
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
-  // Check auth.users directly — more reliable than profiles table
-  const { data: usersPage } = await admin.auth.admin.listUsers({ perPage: 1000 });
-  const authUser = usersPage?.users.find(u => u.email?.toLowerCase() === email);
+  // Same response whether or not the account exists, so this endpoint can't be used
+  // to discover which emails are registered.
+  const ok = () => new Response(JSON.stringify({ success: true }), { status: 200, headers: CORS_HEADERS });
 
-  if (!authUser) {
-    return new Response(
-      JSON.stringify({ error: 'No account found with this email address.' }),
-      { status: 404, headers: CORS_HEADERS }
-    );
+  // Every auth user gets a profiles row from the on_auth_user_created trigger.
+  // (auth.admin.listUsers() is paginated and silently missed users past the first page.)
+  const { data: profile } = await admin.from('profiles').select('id').eq('email', email).maybeSingle();
+  if (!profile) return ok();
+
+  // Rate limit: one code per minute, at most 5 per hour, per email.
+  const hourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const { data: recent } = await admin
+    .from('password_reset_otps')
+    .select('created_at')
+    .eq('email', email)
+    .gte('created_at', hourAgo)
+    .order('created_at', { ascending: false });
+  if (recent && recent.length > 0) {
+    const lastSentMs = Date.now() - new Date(recent[0].created_at).getTime();
+    if (lastSentMs < 60 * 1000 || recent.length >= 5) {
+      return new Response(
+        JSON.stringify({ error: 'Too many reset requests. Please wait a few minutes and try again.' }),
+        { status: 429, headers: CORS_HEADERS }
+      );
+    }
   }
 
   const otp = generateOtp();
@@ -127,5 +143,5 @@ Deno.serve(async (req) => {
     );
   }
 
-  return new Response(JSON.stringify({ success: true }), { status: 200, headers: CORS_HEADERS });
+  return ok();
 });

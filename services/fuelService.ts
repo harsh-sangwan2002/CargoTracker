@@ -58,6 +58,20 @@ export const getFuelLogsByTrip = async (tripId: string): Promise<(FuelLog & { id
   return (data ?? []).map(mapFuelLogRow);
 };
 
+// Fuel logs for a set of trips (chunked to keep the request URL short).
+export const getFuelLogsForTrips = async (tripIds: string[]): Promise<(FuelLog & { id: string })[]> => {
+  const logs: (FuelLog & { id: string })[] = [];
+  for (let i = 0; i < tripIds.length; i += 150) {
+    const { data, error } = await supabase
+      .from('fuel_logs')
+      .select('*')
+      .in('trip_id', tripIds.slice(i, i + 150));
+    if (error) throw error;
+    logs.push(...(data ?? []).map(mapFuelLogRow));
+  }
+  return logs;
+};
+
 export const getFuelLogsByVehicle = async (vehicleId: string): Promise<(FuelLog & { id: string })[]> => {
   const cacheKey = cacheKeyForVehicle(vehicleId);
   const cached = await getCache<(FuelLog & { id: string })[]>(cacheKey);

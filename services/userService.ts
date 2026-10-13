@@ -1,6 +1,5 @@
 import { File } from 'expo-file-system';
 import { supabase } from '../supabaseConfig';
-import { getDrivers } from './driverService';
 
 export interface UserProfile {
   uid: string;
@@ -17,19 +16,6 @@ const mapUserRow = (row: any): UserProfile => ({
   role: row.role,
   createdAt: row.created_at,
 });
-
-export const createUserProfile = async (
-  uid: string,
-  email: string,
-  role: 'driver' | 'manager' | 'admin' = 'driver'
-) => {
-  const { error } = await supabase.from('profiles').upsert({
-    id: uid,
-    email: normalizeEmail(email),
-    role,
-  });
-  if (error) throw error;
-};
 
 export const getUserProfile = async (uid: string): Promise<UserProfile | null> => {
   const { data, error } = await supabase.from('profiles').select('*').eq('id', uid).maybeSingle();
@@ -54,8 +40,10 @@ export const getUserByEmail = async (email: string): Promise<UserProfile | null>
 };
 
 export const updateUserRole = async (uid: string, role: 'driver' | 'manager' | 'admin') => {
-  const { error } = await supabase.from('profiles').update({ role }).eq('id', uid);
+  const { data, error } = await supabase.from('profiles').update({ role }).eq('id', uid).select('role');
   if (error) throw error;
+  // Only admins may change roles; RLS answers anyone else with 0 rows and no error.
+  if (!data?.length || data[0].role !== role) throw new Error('Only admins can change user roles.');
 };
 
 export const isManager = async (uid: string): Promise<boolean> => {
@@ -92,10 +80,7 @@ export const convertImageToBase64 = async (imageUri: string): Promise<string> =>
 };
 
 // ── Staff (admin/manager) extra profile ─────────────────────────────
-// Requires these columns on the profiles table (run once in Supabase SQL editor):
-//   ALTER TABLE profiles ADD COLUMN IF NOT EXISTS full_name TEXT;
-//   ALTER TABLE profiles ADD COLUMN IF NOT EXISTS phone TEXT;
-//   ALTER TABLE profiles ADD COLUMN IF NOT EXISTS address TEXT;
+// Columns full_name / phone / address on profiles (see supabase/schema.sql).
 
 export interface StaffProfile {
   fullName: string;
@@ -118,61 +103,11 @@ export const getStaffProfile = async (uid: string): Promise<StaffProfile | null>
 };
 
 export const upsertStaffProfile = async (uid: string, profile: StaffProfile) => {
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('profiles')
     .update({ full_name: profile.fullName, phone: profile.phone, address: profile.address })
-    .eq('id', uid);
+    .eq('id', uid)
+    .select('id');
   if (error) throw error;
-};
-
-// ── Seed test manager accounts ───────────────────────────────────────
-// Requires email confirmation to be disabled in Supabase Auth settings,
-// or the accounts can be confirmed manually via the Supabase dashboard.
-const TEST_MANAGERS = [
-  { email: 'manager1@cargotracker.com', password: 'Manager@123', name: 'Priya Sharma' },
-  { email: 'manager2@cargotracker.com', password: 'Manager@123', name: 'Rahul Verma' },
-];
-
-export const seedManagerAccounts = async (): Promise<{ email: string; status: string }[]> => {
-  const results: { email: string; status: string }[] = [];
-  for (const m of TEST_MANAGERS) {
-    try {
-      const { data, error } = await supabase.auth.signUp({ email: m.email, password: m.password });
-      if (error) {
-        if (error.message?.toLowerCase().includes('already registered')) {
-          results.push({ email: m.email, status: 'already exists' });
-        } else {
-          results.push({ email: m.email, status: `failed: ${error.message}` });
-        }
-        continue;
-      }
-      const uid = data.user?.id;
-      if (uid) {
-        await supabase.from('profiles').upsert({ id: uid, email: m.email, role: 'manager', full_name: m.name });
-      }
-      results.push({ email: m.email, status: 'created' });
-    } catch (e: any) {
-      results.push({ email: m.email, status: `error: ${e.message}` });
-    }
-  }
-  return results;
-};
-
-export const deleteUserAccountData = async (uid: string) => {
-  const driversList = await getDrivers(uid);
-  const driverIds = driversList.map(d => d.id);
-
-  const results = await Promise.all([
-    supabase.from('notifications').delete().eq('driver_user_id', uid),
-    supabase.from('driver_locations').delete().eq('user_id', uid),
-    supabase.from('trips').delete().or(`user_id.eq.${uid},driver_user_id.eq.${uid}`),
-    driverIds.length
-      ? supabase.from('drivers').delete().in('id', driverIds)
-      : Promise.resolve({ error: null }),
-  ]);
-  const failed = results.find(result => result.error);
-  if (failed?.error) throw failed.error;
-
-  const { error } = await supabase.from('profiles').delete().eq('id', uid);
-  if (error) throw error;
+  if (!data?.length) throw new Error('Your profile could not be updated.');
 };

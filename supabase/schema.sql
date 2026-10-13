@@ -23,7 +23,8 @@ begin
   values (
     new.id::text,
     lower(coalesce(new.email, '')),
-    coalesce(new.raw_user_meta_data->>'role', 'driver'),
+    -- never trust client-supplied user_metadata.role (anyone can sign up with it)
+    'driver',
     coalesce(new.created_at, now())
   )
   on conflict (uid) do update
@@ -236,7 +237,9 @@ begin
   values (
     new.id,
     lower(coalesce(new.email, '')),
-    coalesce((new.raw_user_meta_data->>'role')::user_role, 'driver'),
+    -- every new account starts as a driver; only an admin can promote it.
+    -- (user_metadata is client-controlled via supabase.auth.signUp, so never read the role from it)
+    'driver'::user_role,
     new.raw_user_meta_data->>'full_name',
     coalesce(new.created_at, now())
   )
@@ -666,6 +669,10 @@ begin
      and new.odometer_end >= new.odometer_start then
     new.distance_travelled_km := new.odometer_end - new.odometer_start;
   end if;
+  -- keep the legacy text column in sync so older app builds show the same figure
+  if new.distance_travelled_km is not null then
+    new.distance_travelled := new.distance_travelled_km::text;
+  end if;
   return new;
 end;
 $$;
@@ -709,8 +716,9 @@ begin
     lower(tg_op),
     'trip',
     coalesce(new.id, old.id),
-    case when tg_op in ('update', 'delete') then to_jsonb(old) else null end,
-    case when tg_op in ('insert', 'update') then to_jsonb(new) else null end
+    -- TG_OP is upper-case ('INSERT' / 'UPDATE' / 'DELETE')
+    case when tg_op in ('UPDATE', 'DELETE') then to_jsonb(old) else null end,
+    case when tg_op in ('INSERT', 'UPDATE') then to_jsonb(new) else null end
   );
   return coalesce(new, old);
 end;
@@ -728,7 +736,7 @@ security definer
 set search_path = public
 as $$
 begin
-  if tg_op = 'update' and new.role is distinct from old.role then
+  if tg_op = 'UPDATE' and new.role is distinct from old.role then
     insert into public.audit_logs (actor_id, action, entity_type, entity_id, old_value, new_value)
     values (auth.uid(), 'role_change', 'profile', new.id, jsonb_build_object('role', old.role), jsonb_build_object('role', new.role));
   end if;
@@ -825,4 +833,182 @@ create index if not exists password_reset_otps_email_idx on public.password_rese
 
 -- Only the service role (edge functions) can read/write this table.
 alter table public.password_reset_otps enable row level security;
+drop policy if exists otp_no_public_access on public.password_reset_otps;
 create policy otp_no_public_access on public.password_reset_otps for all using (false);
+
+-- ============================================================================
+-- Bug-fix migration (Oct 2026)
+-- (additive/idempotent — safe to re-run)
+--
+-- The guard triggers below are deliberately NOT security definer: inside them
+-- current_user is 'authenticated' for requests coming from the app, and the
+-- function owner for trusted server-side code (SECURITY DEFINER RPCs, edge
+-- functions using the service role, migrations), which is exempt.
+-- ============================================================================
+
+-- ── profiles: self-service name/phone/address ───────────────────────────
+alter table public.profiles add column if not exists address text;
+
+drop policy if exists profiles_update_self on public.profiles;
+create policy profiles_update_self on public.profiles for update
+  using (id = auth.uid())
+  with check (id = auth.uid());
+
+create or replace function public.guard_profile_update()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  -- role / is_active / email remain admin-only, even on your own row
+  if current_user = 'authenticated' and coalesce(public.current_user_role()::text, '') <> 'admin' then
+    new.id := old.id;
+    new.role := old.role;
+    new.is_active := old.is_active;
+    new.email := old.email;
+  end if;
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
+drop trigger if exists profiles_guard_update on public.profiles;
+create trigger profiles_guard_update
+before update on public.profiles
+for each row execute function public.guard_profile_update();
+
+-- ── drivers: a driver may edit their own personal details ───────────────
+drop policy if exists drivers_update_own on public.drivers;
+create policy drivers_update_own on public.drivers for update
+  using (profile_id = auth.uid())
+  with check (profile_id = auth.uid());
+
+create or replace function public.guard_driver_update()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  -- drivers can only change their personal fields; account link, status and
+  -- email (used for linking) stay with staff
+  if current_user = 'authenticated' and public.current_user_role() = 'driver' then
+    new := jsonb_populate_record(old, jsonb_build_object(
+      'full_name', new.full_name,
+      'age', new.age,
+      'address', new.address,
+      'aadhaar_number', new.aadhaar_number,
+      'pan_number', new.pan_number,
+      'license_number', new.license_number,
+      'license_expiry', new.license_expiry,
+      'photo_path', new.photo_path,
+      'vehicle_owned', new.vehicle_owned
+    ));
+  end if;
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
+drop trigger if exists drivers_guard_update on public.drivers;
+create trigger drivers_guard_update
+before update on public.drivers
+for each row execute function public.guard_driver_update();
+
+-- Links the signed-in driver to their driver record: an existing linked row, else
+-- an admin-created row with the same email, else a new empty row. Also backfills
+-- driver_user_id on that driver's trips so they show up in the driver's portal.
+create or replace function public.claim_driver_record()
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_email text;
+  v_id uuid;
+begin
+  if v_uid is null then
+    raise exception 'not authenticated';
+  end if;
+  if public.current_user_role() is distinct from 'driver' then
+    return null;
+  end if;
+
+  select id into v_id from public.drivers where profile_id = v_uid order by created_at limit 1;
+
+  if v_id is null then
+    select email into v_email from public.profiles where id = v_uid;
+    if coalesce(v_email, '') <> '' then
+      select id into v_id
+      from public.drivers
+      where profile_id is null and lower(email) = v_email
+      order by created_at
+      limit 1;
+    end if;
+
+    if v_id is not null then
+      update public.drivers set profile_id = v_uid, user_id = v_uid where id = v_id;
+    else
+      insert into public.drivers (full_name, email, user_id, profile_id)
+      values ('', nullif(v_email, ''), v_uid, v_uid)
+      returning id into v_id;
+    end if;
+  end if;
+
+  update public.trips
+  set driver_user_id = v_uid
+  where driver_id = v_id and driver_user_id is distinct from v_uid;
+
+  return v_id;
+end;
+$$;
+
+revoke all on function public.claim_driver_record() from public, anon;
+grant execute on function public.claim_driver_record() to authenticated;
+
+-- ── trips: drivers may only start/end their trip and record odometer ────
+-- (previously trips_update_own_driver let a driver rewrite fuel, distance,
+-- quantity, etc. on their own trips)
+create or replace function public.guard_trip_driver_update()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if current_user = 'authenticated' and public.current_user_role() = 'driver' then
+    new := jsonb_populate_record(old, jsonb_build_object(
+      'status', new.status,
+      'trip_status', new.trip_status,
+      'departure_time', new.departure_time,
+      'arrival_time', new.arrival_time,
+      'odometer_start', new.odometer_start,
+      'odometer_end', new.odometer_end
+    ));
+  end if;
+  return new;
+end;
+$$;
+
+-- name sorts before trips_compute_distance so the distance is computed from the
+-- guarded row (BEFORE triggers fire in name order)
+drop trigger if exists trips_a_guard_driver_update on public.trips;
+create trigger trips_a_guard_driver_update
+before update on public.trips
+for each row execute function public.guard_trip_driver_update();
+
+-- backfill: odometer-derived distance was never copied to the text column the app read
+update public.trips
+set distance_travelled = distance_travelled_km::text
+where distance_travelled_km is not null
+  and distance_travelled is distinct from distance_travelled_km::text;
+
+-- ── account deletion must not be blocked by FKs ─────────────────────────
+-- drivers.created_by was added without an on-delete action, so deleting an admin
+-- who created drivers failed with an FK violation.
+alter table public.drivers drop constraint if exists drivers_created_by_fkey;
+alter table public.drivers add constraint drivers_created_by_fkey
+  foreign key (created_by) references public.profiles(id) on delete set null;
+
+-- ── password reset OTP: brute-force protection ──────────────────────────
+alter table public.password_reset_otps add column if not exists attempts integer not null default 0;

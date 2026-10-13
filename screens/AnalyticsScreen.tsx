@@ -19,7 +19,8 @@ import {auth} from '../supabaseConfig';
 import {getTrips, getTripsByUser, TripRecord} from '../services/tripService';
 import {getDrivers, Driver} from '../services/driverService';
 import {getVehicles, Vehicle} from '../services/vehicleService';
-import {vehicleStatsFromTrips} from '../services/analyticsService';
+import {vehicleStatsFromTrips, fuelByTripFromLogs, tripFuelLiters, tripDistanceKm, FuelByTrip} from '../services/analyticsService';
+import {getFuelLogsForTrips} from '../services/fuelService';
 import {Colors, FontSize, Radius, Shadow, Spacing} from '../utils/theme';
 import {ShimmerStatsRow, ShimmerList} from '../components/Shimmer';
 import type {UserRole} from './MainTabsScreen';
@@ -194,6 +195,7 @@ export default function AnalyticsScreen({role}: Props) {
   const user = auth.currentUser;
 
   const [allTrips, setAllTrips] = useState<(TripRecord & {id: string})[]>([]);
+  const [fuelByTrip, setFuelByTrip] = useState<FuelByTrip>(() => new Map());
   const [drivers, setDrivers] = useState<(Driver & {id: string})[]>([]);
   const [vehicles, setVehicles] = useState<(Vehicle & {id: string})[]>([]);
   const [loading, setLoading] = useState(true);
@@ -259,6 +261,9 @@ export default function AnalyticsScreen({role}: Props) {
       setAllTrips(t);
       setDrivers(d);
       setVehicles(v);
+      // Non-fatal: without logs the per-trip quick-entry fuel figure is used.
+      const logs = await getFuelLogsForTrips(t.map(trip => trip.id)).catch(() => []);
+      setFuelByTrip(fuelByTripFromLogs(logs));
     } catch (e) {
       console.error(e);
     } finally {
@@ -303,8 +308,8 @@ export default function AnalyticsScreen({role}: Props) {
   const totalTrips = filtered.length;
   const activeTrips = filtered.filter((t) => !t.arrivalTime).length;
   const deliveredTrips = filtered.filter((t) => !!t.arrivalTime).length;
-  const totalFuel = filtered.reduce((s, t) => s + (parseFloat(t.fuelFilled) || 0), 0);
-  const totalDist = filtered.reduce((s, t) => s + (parseFloat(t.distanceTravelled ?? '0') || 0), 0);
+  const totalFuel = filtered.reduce((s, t) => s + tripFuelLiters(t, fuelByTrip), 0);
+  const totalDist = filtered.reduce((s, t) => s + tripDistanceKm(t), 0);
   const avgFuel = totalTrips > 0 ? (totalFuel / totalTrips).toFixed(1) : '0';
 
   /* ── Trips per driver ──────────────────────────────────────────── */
@@ -317,8 +322,8 @@ export default function AnalyticsScreen({role}: Props) {
       const driver = t.driverId ? driversById.get(t.driverId) : undefined;
       if (!map[key]) map[key] = { label: driver?.fullName || t.driverName || 'Unknown', trips: 0, fuel: 0, distance: 0, completedTrips: 0, totalTripHours: 0 };
       map[key].trips++;
-      map[key].fuel += parseFloat(t.fuelFilled) || 0;
-      map[key].distance += parseFloat(t.distanceTravelled ?? '0') || 0;
+      map[key].fuel += tripFuelLiters(t, fuelByTrip);
+      map[key].distance += tripDistanceKm(t);
       if (t.arrivalTime) {
         map[key].completedTrips++;
         const hours = (t.arrivalTime.getTime() - t.departureTime.getTime()) / (1000 * 60 * 60);
@@ -340,12 +345,12 @@ export default function AnalyticsScreen({role}: Props) {
       })
       .sort((a, b) => b[1].trips - a[1].trips)
       .slice(0, 10);
-  }, [filtered, driversById]);
+  }, [filtered, driversById, fuelByTrip]);
 
   const driverChartData = driverStats.map(([label, v]) => ({label, value: v.trips}));
 
   /* ── Per-truck distance & fuel breakdown ───────────────────────── */
-  const vehicleStats = useMemo(() => vehicleStatsFromTrips(filtered, vehicles), [filtered, vehicles]);
+  const vehicleStats = useMemo(() => vehicleStatsFromTrips(filtered, vehicles, fuelByTrip), [filtered, vehicles, fuelByTrip]);
 
   /* ── Fixed 7-day chart using reliable date keys ────────────────── */
   const dayChartData = useMemo(() => {

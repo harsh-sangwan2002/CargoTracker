@@ -14,9 +14,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-import { auth, reauthenticateWithPassword, signOut, updatePassword } from '../supabaseConfig';
-import { deleteUserAccountData, getStaffProfile, upsertStaffProfile, seedManagerAccounts, StaffProfile } from '../services/userService';
-import { getDriverByUserId, getDriverByEmail, addDriver, updateDriver, Driver } from '../services/driverService';
+import { auth, deleteAccount, reauthenticateWithPassword, signOut, updatePassword } from '../supabaseConfig';
+import { getStaffProfile, upsertStaffProfile, StaffProfile } from '../services/userService';
+import { claimDriverRecord, getDriverById, updateDriver, Driver } from '../services/driverService';
+import { getPendingOfflineCount } from '../utils/offlineQueue';
+import { stopDriverTracking } from '../utils/driverTracking';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
 import type { UserRole } from './MainTabsScreen';
 
@@ -66,9 +68,6 @@ export default function ProfileScreen({ role, profileComplete = true, onProfileS
   const [confirmPass, setConfirmPass] = useState('');
   const [changingPw, setChangingPw] = useState(false);
 
-  // Seed managers state
-  const [seeding, setSeeding] = useState(false);
-
   const roleLabel = role === 'admin' ? 'Admin' : role === 'manager' ? 'Manager' : 'Driver';
   const roleColor = role === 'admin' ? Colors.roleAdmin : role === 'manager' ? Colors.roleManager : Colors.roleDriver;
   const roleLight = role === 'admin' ? Colors.roleAdminLight : role === 'manager' ? Colors.roleManagerLight : Colors.roleDriverLight;
@@ -87,11 +86,10 @@ export default function ProfileScreen({ role, profileComplete = true, onProfileS
   useEffect(() => {
     if (role !== 'driver' || !user?.uid) return;
     setLoadingProfile(true);
-    const email = (user.email ?? '').trim().toLowerCase();
 
-    getDriverByUserId(user.uid)
-      .then(async byUid => {
-        const profile = byUid ?? (email ? await getDriverByEmail(email) : null);
+    claimDriverRecord()
+      .then(async driverId => {
+        const profile = driverId ? await getDriverById(driverId) : null;
         if (profile) {
           setDriverProfile(profile);
           setDriverForm({
@@ -128,41 +126,19 @@ export default function ProfileScreen({ role, profileComplete = true, onProfileS
     if (!user?.uid) return;
     setSavingProfile(true);
     try {
-      const uid = user.uid;
-      const email = (user.email ?? '').trim().toLowerCase();
       const payload = {
         fullName: driverForm.fullName.trim(),
         age: parseInt(driverForm.age),
         address: driverForm.address.trim(),
         aadhaarCard: driverForm.aadhaarCard.trim(),
         panCard: driverForm.panCard.trim().toUpperCase(),
-        email,
       };
 
-      if (driverProfile) {
-        await updateDriver(driverProfile.id, payload);
-        setDriverProfile(prev => prev ? { ...prev, ...payload } : null);
-      } else {
-        const byEmail = email ? await getDriverByEmail(email) : null;
-        if (byEmail) {
-          await updateDriver(byEmail.id, { ...payload, userId: uid });
-          setDriverProfile({ ...byEmail, ...payload, userId: uid });
-        } else {
-          const newId = await addDriver({
-            ...payload,
-            vehicleOwned: '',
-            photoUrl: '',
-            userId: uid,
-          });
-          setDriverProfile({
-            id: newId as string,
-            ...payload,
-            vehicleOwned: '',
-            photoUrl: '',
-            userId: uid,
-          });
-        }
-      }
+      // Every driver account has (or is linked to) exactly one driver record.
+      const driverId = driverProfile?.id ?? await claimDriverRecord();
+      if (!driverId) throw new Error('No driver record for this account.');
+      await updateDriver(driverId, payload);
+      setDriverProfile(driverProfile ? { ...driverProfile, ...payload } : await getDriverById(driverId));
       setEditingProfile(false);
       onProfileSaved?.();
       Alert.alert('Saved', 'Your profile has been updated.');
@@ -209,34 +185,23 @@ export default function ProfileScreen({ role, profileComplete = true, onProfileS
     }
   };
 
-  const handleSeedManagers = async () => {
-    Alert.alert(
-      'Seed Manager Accounts',
-      'This will create:\n• manager1@cargotracker.com\n• manager2@cargotracker.com\n\nPassword: Manager@123\n\nNote: Requires email confirmation to be OFF in Supabase Auth settings.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Create', onPress: async () => {
-            setSeeding(true);
-            try {
-              const results = await seedManagerAccounts();
-              const summary = results.map(r => `${r.email}: ${r.status}`).join('\n');
-              Alert.alert('Seeding Complete', summary);
-            } catch {
-              Alert.alert('Error', 'Failed to seed accounts.');
-            } finally {
-              setSeeding(false);
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  const handleLogout = () => {
-    Alert.alert('Sign out', 'Are you sure you want to sign out?', [
+  const handleLogout = async () => {
+    // Trip starts/ends recorded offline are replayed on sign-out if we're online;
+    // otherwise they'd be lost, so say so.
+    const pending = await getPendingOfflineCount();
+    const message = pending > 0
+      ? `You have ${pending} trip update${pending > 1 ? 's' : ''} that haven't synced yet. Connect to the internet before signing out, or they will be lost.`
+      : 'Are you sure you want to sign out?';
+    Alert.alert('Sign out', message, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Sign Out', style: 'destructive', onPress: () => signOut() },
+      {
+        text: 'Sign Out',
+        style: 'destructive',
+        onPress: () => {
+          stopDriverTracking();
+          signOut().catch(() => {});
+        },
+      },
     ]);
   };
 
@@ -246,9 +211,9 @@ export default function ProfileScreen({ role, profileComplete = true, onProfileS
     setDeleting(true);
     try {
       await reauthenticateWithPassword(user.email, deletePass);
-      await deleteUserAccountData(user.uid);
-      await signOut();
+      stopDriverTracking();
       setDeleteModal(false);
+      await deleteAccount();
     } catch (err: any) {
       Alert.alert('Error', err.message?.toLowerCase?.().includes('invalid') ? 'Incorrect password.' : 'Failed to delete account.');
     } finally {
@@ -483,13 +448,6 @@ export default function ProfileScreen({ role, profileComplete = true, onProfileS
             <Text style={s.actionLabel}>Change Password</Text>
             <Text style={s.actionArrow}>›</Text>
           </TouchableOpacity>
-          {role === 'admin' && (
-            <TouchableOpacity style={s.actionBtn} onPress={handleSeedManagers} activeOpacity={0.8} disabled={seeding}>
-              <Text style={s.actionIcon}>👥</Text>
-              <Text style={s.actionLabel}>{seeding ? 'Creating Managers...' : 'Seed Test Managers'}</Text>
-              {seeding ? <ActivityIndicator size="small" color={Colors.primary} /> : <Text style={s.actionArrow}>›</Text>}
-            </TouchableOpacity>
-          )}
           <TouchableOpacity style={s.actionBtn} onPress={handleLogout} activeOpacity={0.8}>
             <Text style={s.actionIcon}>🚪</Text>
             <Text style={s.actionLabel}>Sign Out</Text>
@@ -499,8 +457,8 @@ export default function ProfileScreen({ role, profileComplete = true, onProfileS
             style={[s.actionBtn, s.dangerBtn]}
             onPress={() => {
               Alert.alert(
-                'Delete App Data',
-                'This will permanently delete your CargoTracker profile data and sign you out. Supabase Auth account deletion requires an admin backend.',
+                'Delete Account',
+                'This permanently deletes your CargoTracker account and personal details and signs you out. Trip records stay with your company. This cannot be undone.',
                 [
                   { text: 'Cancel', style: 'cancel' },
                   { text: 'Continue', style: 'destructive', onPress: () => setDeleteModal(true) },
@@ -510,7 +468,7 @@ export default function ProfileScreen({ role, profileComplete = true, onProfileS
             activeOpacity={0.8}
           >
             <Text style={s.actionIcon}>🗑️</Text>
-            <Text style={[s.actionLabel, { color: Colors.danger }]}>Delete App Data</Text>
+            <Text style={[s.actionLabel, { color: Colors.danger }]}>Delete Account</Text>
             <Text style={[s.actionArrow, { color: Colors.danger }]}>›</Text>
           </TouchableOpacity>
         </View>

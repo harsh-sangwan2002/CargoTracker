@@ -1,6 +1,8 @@
 import 'react-native-url-polyfill/auto';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient, Session, User } from '@supabase/supabase-js';
+import { clearAllCache } from './utils/cache';
+import { clearOfflineQueue, flushOfflineQueue } from './utils/offlineQueue';
 
 // Supabase URL and anon/publishable key are safe to ship in the client bundle —
 // they are not secrets; access control is enforced server-side via Row Level
@@ -73,19 +75,40 @@ export const signInWithEmailAndPassword = async (email: string, password: string
 };
 
 export const createUserWithEmailAndPassword = async (email: string, password: string) => {
-  const { data, error } = await supabase.auth.signUp({
-    email,
-    password,
-    options: { data: { role: 'driver' } },
-  });
+  // Every new account is a driver; the role is assigned server-side (never from user_metadata).
+  const { data, error } = await supabase.auth.signUp({ email, password });
   if (error) throw error;
   return data;
 };
 
+// Cached trips/drivers and queued offline writes belong to the signed-in user, so they
+// must not survive into the next session on this device.
 export const signOut = async () => {
-  const { error } = await supabase.auth.signOut();
-  if (error) throw error;
-  cachedUser = null;
+  // Replay anything done offline while this user's session is still valid.
+  await flushOfflineQueue().catch(() => {});
+  try {
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
+  } finally {
+    cachedUser = null;
+    await Promise.all([clearAllCache(), clearOfflineQueue()]);
+  }
+};
+
+// supabase-js only reports "non-2xx status code" for function errors; the real
+// message is in the JSON body on error.context.
+export const invokeFunction = async <T = any>(name: string, body?: Record<string, unknown>): Promise<T> => {
+  const { data, error } = await supabase.functions.invoke(name, { body });
+  if (error) {
+    const context = (error as any)?.context;
+    if (context && typeof context.json === 'function') {
+      const parsed = await context.json().catch(() => null);
+      if (parsed?.error) throw new Error(parsed.error);
+    }
+    throw error;
+  }
+  if ((data as any)?.error) throw new Error((data as any).error);
+  return data as T;
 };
 
 export const reauthenticateWithPassword = async (email: string, password: string) => {
@@ -93,23 +116,23 @@ export const reauthenticateWithPassword = async (email: string, password: string
   if (error) throw error;
 };
 
-// Sends a 6-digit OTP via Mailgun through the password-otp-send edge function.
+// Sends a 6-digit OTP by email through the password-otp-send edge function. The
+// function responds the same way whether or not the email is registered.
 export const sendOtp = async (email: string) => {
-  const { data, error } = await supabase.functions.invoke('password-otp-send', {
-    body: { email },
-  });
-  if (error) throw error;
-  if (data?.error) throw new Error(data.error);
+  await invokeFunction('password-otp-send', { email });
 };
 
 // Verifies the OTP and resets the password atomically via the password-otp-verify edge function.
 // No active session is required — the edge function uses the service role to update the password.
 export const resetPasswordWithOtp = async (email: string, otp: string, newPassword: string) => {
-  const { data, error } = await supabase.functions.invoke('password-otp-verify', {
-    body: { email, otp, newPassword },
-  });
-  if (error) throw error;
-  if (data?.error) throw new Error(data.error);
+  await invokeFunction('password-otp-verify', { email, otp, newPassword });
+};
+
+// Permanently deletes the signed-in user's account (auth user + personal driver record)
+// via the delete-account edge function, then signs out locally.
+export const deleteAccount = async () => {
+  await invokeFunction('delete-account');
+  await signOut().catch(() => {});
 };
 
 // Used by ProfileScreen change-password (requires an active session).

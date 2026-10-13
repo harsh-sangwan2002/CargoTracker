@@ -63,7 +63,7 @@ export default function PlantManagementScreen() {
   const load = async () => {
     setLoading(true);
     try {
-      await seedDefaultPlantsIfEmpty();
+      await seedDefaultPlantsIfEmpty().catch(() => {});
       const data = await getPlants();
       setPlants(data);
     } catch (e) {

@@ -6,6 +6,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { onAuthStateChanged } from './supabaseConfig';
 import { Colors, FontSize, Radius, Shadow, Spacing } from './utils/theme';
 import { initOfflineQueueSync } from './utils/offlineQueue';
+import { registerDefaultOfflineHandlers } from './utils/offlineHandlers';
 
 import LoginScreen from './screens/LoginScreen';
 import RegisterScreen from './screens/RegisterScreen';
@@ -35,6 +36,7 @@ export default function App() {
   const [user, setUser] = useState<any>(undefined);
 
   useEffect(() => {
+    registerDefaultOfflineHandlers();
     initOfflineQueueSync();
   }, []);
 

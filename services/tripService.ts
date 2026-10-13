@@ -29,8 +29,13 @@ export interface TripRecord {
 }
 
 const toDate = (value: any): Date => value ? new Date(value) : new Date(0);
+// numeric columns are the source of truth (the DB computes distance_travelled_km from
+// the odometer); the legacy text columns are only a fallback for old rows.
+const numericOr = (num: any, legacy: any, fallback: string) =>
+  num !== null && num !== undefined && num !== '' ? String(Number(num)) : (legacy ?? fallback);
 const nullableDate = (value: any): Date | null => value ? new Date(value) : null;
-const cleanId = (value?: string) => value?.trim() ? value.trim() : null;
+// undefined = "not part of this update" (left untouched); '' = clear the link
+const cleanId = (value?: string) => value === undefined ? undefined : (value.trim() ? value.trim() : null);
 
 const mapRow = (row: any): TripRecord & { id: string } => ({
   id: row.id,
@@ -40,8 +45,8 @@ const mapRow = (row: any): TripRecord & { id: string } => ({
   companyName: row.company_name ?? '',
   itemType: row.item_type ?? '',
   quantity: row.quantity ?? '',
-  fuelFilled: row.fuel_filled ?? '0',
-  distanceTravelled: row.distance_travelled ?? '',
+  fuelFilled: numericOr(row.fuel_filled_liters, row.fuel_filled, '0'),
+  distanceTravelled: numericOr(row.distance_travelled_km, row.distance_travelled, ''),
   departureTime: toDate(row.departure_time),
   arrivalTime: nullableDate(row.arrival_time),
   fromPlant: row.from_plant ?? '',
@@ -60,13 +65,18 @@ const mapRow = (row: any): TripRecord & { id: string } => ({
   createdAt: row.created_at,
 });
 
-const tripStatusOf = (status?: string) => {
+export const tripStatusOf = (status?: string) => {
   const normalized = (status ?? '').toLowerCase();
   if (normalized === 'delivered' || normalized === 'completed') return 'completed';
   if (normalized === 'cancelled') return 'cancelled';
   if (normalized === 'pending') return 'pending';
   return 'active';
 };
+
+// A trip the driver has pressed "Start" on (startTrip sets status 'active').
+// Legacy rows created by staff as 'Active' have not been started by the driver.
+export const isTripStarted = (t: { status?: string; arrivalTime: Date | null }) =>
+  t.status === 'active' && !t.arrivalTime;
 
 const toRow = (trip: Partial<TripRecord>) => ({
   truck: trip.truck,
@@ -80,7 +90,7 @@ const toRow = (trip: Partial<TripRecord>) => ({
   distance_travelled: trip.distanceTravelled,
   distance_travelled_km: trip.distanceTravelled !== undefined ? (parseFloat(trip.distanceTravelled) || 0) : undefined,
   departure_time: trip.departureTime?.toISOString?.() ?? trip.departureTime,
-  arrival_time: trip.arrivalTime ? trip.arrivalTime.toISOString() : null,
+  arrival_time: trip.arrivalTime === undefined ? undefined : (trip.arrivalTime ? trip.arrivalTime.toISOString() : null),
   from_plant: trip.fromPlant,
   to_plant: trip.toPlant,
   status: trip.status,
@@ -107,6 +117,24 @@ const reviveTrip = (raw: any): TripRecord & { id: string } => ({
 
 const invalidateTripCache = () => clearCacheByPrefix('trips_');
 
+// PostgREST caps a response at the project's max-rows (1000 by default on Supabase),
+// so read in pages; otherwise totals silently stop growing after 1000 trips.
+const PAGE = 1000;
+const fetchAllTrips = async (driverUid?: string): Promise<any[]> => {
+  const rows: any[] = [];
+  for (let from = 0; ; from += PAGE) {
+    let query = supabase.from('trips').select('*');
+    if (driverUid) query = query.eq('driver_user_id', driverUid);
+    const { data, error } = await query
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    rows.push(...(data ?? []));
+    if (!data || data.length < PAGE) return rows;
+  }
+};
+
 export const addTrip = async (trip: Omit<TripRecord, 'createdAt'>) => {
   const { error } = await supabase.from('trips').insert(compactRow(toRow(trip)));
   if (error) throw error;
@@ -117,12 +145,7 @@ export const getTrips = async (): Promise<(TripRecord & { id: string })[]> => {
   const cached = await getCache<any[]>('trips_all');
   if (cached) return cached.map(reviveTrip);
 
-  const { data, error } = await supabase
-    .from('trips')
-    .select('*')
-    .order('created_at', { ascending: false });
-  if (error) throw error;
-  const trips = (data ?? []).map(mapRow);
+  const trips = (await fetchAllTrips()).map(mapRow);
   setCache('trips_all', trips, TTL.SHORT);
   return trips;
 };
@@ -132,34 +155,9 @@ export const getTripsByUser = async (driverUid: string): Promise<(TripRecord & {
   const cached = await getCache<any[]>(key);
   if (cached) return cached.map(reviveTrip);
 
-  const { data, error } = await supabase
-    .from('trips')
-    .select('*')
-    .eq('driver_user_id', driverUid)
-    .order('created_at', { ascending: false });
-  if (error) throw error;
-  const trips = (data ?? []).map(mapRow);
+  const trips = (await fetchAllTrips(driverUid)).map(mapRow);
   setCache(key, trips, TTL.SHORT);
   return trips;
-};
-
-export const getTripsByDateRange = async (
-  startDate: Date,
-  endDate: Date,
-  userId?: string
-): Promise<(TripRecord & { id: string })[]> => {
-  let query = supabase
-    .from('trips')
-    .select('*')
-    .gte('created_at', startDate.toISOString())
-    .lte('created_at', endDate.toISOString())
-    .order('created_at', { ascending: false });
-
-  if (userId) query = query.eq('user_id', userId);
-
-  const { data, error } = await query;
-  if (error) throw error;
-  return (data ?? []).map(mapRow);
 };
 
 export const updateTrip = async (id: string, data: Partial<TripRecord>) => {
@@ -168,19 +166,21 @@ export const updateTrip = async (id: string, data: Partial<TripRecord>) => {
   await invalidateTripCache();
 };
 
-export const startTrip = async (id: string) => {
+// `at` is when the driver tapped Start/End — passed explicitly when the action was
+// queued offline and is replayed later.
+export const startTrip = async (id: string, at: Date = new Date()) => {
   const { error } = await supabase
     .from('trips')
-    .update({ departure_time: new Date().toISOString(), status: 'active', trip_status: 'active' })
+    .update({ departure_time: at.toISOString(), status: 'active', trip_status: 'active' })
     .eq('id', id);
   if (error) throw error;
   await invalidateTripCache();
 };
 
-export const endTrip = async (id: string) => {
+export const endTrip = async (id: string, at: Date = new Date()) => {
   const { error } = await supabase
     .from('trips')
-    .update({ arrival_time: new Date().toISOString(), status: 'completed', trip_status: 'completed' })
+    .update({ arrival_time: at.toISOString(), status: 'completed', trip_status: 'completed' })
     .eq('id', id);
   if (error) throw error;
   await invalidateTripCache();

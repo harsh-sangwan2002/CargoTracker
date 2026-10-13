@@ -20,7 +20,8 @@ export interface Driver {
 
 const CACHE_KEY = 'drivers_all';
 
-const cleanId = (value?: string) => value?.trim() ? value.trim() : null;
+// undefined = "not part of this update" (left untouched); '' = clear the link
+const cleanId = (value?: string) => value === undefined ? undefined : (value.trim() ? value.trim() : null);
 
 const mapDriverRow = (row: any): Driver & { id: string } => ({
   id: row.id,
@@ -111,8 +112,15 @@ export const getDriverById = async (driverId: string): Promise<(Driver & { id: s
 };
 
 export const updateDriver = async (driverId: string, data: Partial<Driver>) => {
-  const { error } = await supabase.from('drivers').update(compactRow(toDriverRow(data))).eq('id', driverId);
+  const { data: rows, error } = await supabase
+    .from('drivers')
+    .update(compactRow(toDriverRow(data)))
+    .eq('id', driverId)
+    .select('id');
   if (error) throw error;
+  // RLS turns a disallowed update into "0 rows, no error" — surface it instead of
+  // letting the UI report a save that never happened.
+  if (!rows?.length) throw new Error('You do not have permission to update this driver.');
   clearCache(CACHE_KEY);
 };
 
@@ -161,14 +169,12 @@ export const createDriverAccount = async (
   return data;
 };
 
-export const linkDriverToUser = async (driverId: string, uid: string) => {
-  // profile_id must be set alongside user_id — the drivers_select_own RLS policy
-  // gates a driver's own read access on profile_id = auth.uid(), not user_id.
-  // Without it, the driver's own record becomes permanently invisible to them.
-  const { error } = await supabase
-    .from('drivers')
-    .update({ user_id: uid, profile_id: uid, updated_at: new Date().toISOString() })
-    .eq('id', driverId);
+// Links the signed-in driver to their driver record (server-side: existing link →
+// admin-created record with the same email → new empty record) and returns its id.
+// Returns null for staff accounts.
+export const claimDriverRecord = async (): Promise<string | null> => {
+  const { data, error } = await supabase.rpc('claim_driver_record');
   if (error) throw error;
   clearCache(CACHE_KEY);
+  return (data as string | null) ?? null;
 };

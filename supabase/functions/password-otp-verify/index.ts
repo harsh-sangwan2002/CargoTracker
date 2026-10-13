@@ -4,6 +4,7 @@ import { createClient } from 'jsr:@supabase/supabase-js@2';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+const MAX_ATTEMPTS = 5;
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -55,7 +56,7 @@ Deno.serve(async (req) => {
   // Fetch the most recent active OTP for this email
   const { data: record } = await admin
     .from('password_reset_otps')
-    .select('id, otp_hash, expires_at, used')
+    .select('id, otp_hash, expires_at, used, attempts')
     .eq('email', email)
     .eq('used', false)
     .order('created_at', { ascending: false })
@@ -78,22 +79,24 @@ Deno.serve(async (req) => {
 
   const inputHash = await hashOtp(otp);
   if (inputHash !== record.otp_hash) {
-    return new Response(
-      JSON.stringify({ error: 'Incorrect OTP code. Check the email and try again.' }),
-      { status: 400, headers: CORS_HEADERS }
-    );
+    // A 6-digit code is brute-forceable without a cap: burn the code after 5 misses.
+    const attempts = (record.attempts ?? 0) + 1;
+    await admin
+      .from('password_reset_otps')
+      .update({ attempts, used: attempts >= MAX_ATTEMPTS })
+      .eq('id', record.id);
+    const message = attempts >= MAX_ATTEMPTS
+      ? 'Too many incorrect attempts. Please request a new code.'
+      : 'Incorrect OTP code. Check the email and try again.';
+    return new Response(JSON.stringify({ error: message }), { status: 400, headers: CORS_HEADERS });
   }
 
   // Mark OTP as used before updating password (prevent replay)
   await admin.from('password_reset_otps').update({ used: true }).eq('id', record.id);
 
-  // Look up the auth user by email
-  const { data: usersPage, error: listError } = await admin.auth.admin.listUsers({ perPage: 1000 });
-  if (listError) {
-    return new Response(JSON.stringify({ error: 'Failed to find user.' }), { status: 500, headers: CORS_HEADERS });
-  }
-
-  const user = usersPage.users.find(u => u.email?.toLowerCase() === email);
+  // Every auth user has a profiles row (on_auth_user_created trigger); listUsers()
+  // is paginated and missed accounts past the first page.
+  const { data: user } = await admin.from('profiles').select('id').eq('email', email).maybeSingle();
   if (!user) {
     return new Response(JSON.stringify({ error: 'User account not found.' }), { status: 404, headers: CORS_HEADERS });
   }

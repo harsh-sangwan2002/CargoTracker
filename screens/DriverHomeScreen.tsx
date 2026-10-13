@@ -1,15 +1,14 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity,
   Alert, Switch, ActivityIndicator, RefreshControl, TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import * as Location from 'expo-location';
 import NetInfo from '@react-native-community/netinfo';
 import { auth } from '../supabaseConfig';
-import { getTripsByUser, subscribeToDriverTrips, startTrip, endTrip, TripRecord } from '../services/tripService';
-import { registerOfflineHandler, enqueueOfflineOp } from '../utils/offlineQueue';
-import { updateDriverLocation, clearDriverTracking } from '../services/locationService';
+import { getTripsByUser, subscribeToDriverTrips, startTrip, endTrip, isTripStarted, TripRecord } from '../services/tripService';
+import { enqueueOfflineOp } from '../utils/offlineQueue';
+import { startDriverTracking, stopDriverTracking, isDriverTracking, onDriverTrackingChange } from '../utils/driverTracking';
 import { getDriverNotifications, subscribeToDriverNotifications, markAllNotificationsRead, AppNotification } from '../services/notificationService';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
 import { ShimmerStatsRow, ShimmerList } from '../components/Shimmer';
@@ -27,9 +26,8 @@ export default function DriverHomeScreen({ onTabPress, onNavigateToTrip }: Props
   const [trips, setTrips] = useState<Trip[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [isTracking, setIsTracking] = useState(false);
+  const [isTracking, setIsTracking] = useState(isDriverTracking());
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const locationWatcher = useRef<Location.LocationSubscription | null>(null);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [dismissingNotifs, setDismissingNotifs] = useState(false);
   const [searchQ, setSearchQ] = useState('');
@@ -45,8 +43,8 @@ export default function DriverHomeScreen({ onTabPress, onNavigateToTrip }: Props
       const data = await getTripsByUser(user?.uid ?? '');
       setTrips(data);
       // Auto-resume GPS if driver has an active trip and isn't already tracking
-      const running = data.find(t => t.status === 'active' && !t.arrivalTime);
-      if (running && !locationWatcher.current) {
+      const running = data.find(isTripStarted);
+      if (running && !isDriverTracking()) {
         await startGPS(running);
       }
     } catch (e) {
@@ -58,22 +56,19 @@ export default function DriverHomeScreen({ onTabPress, onNavigateToTrip }: Props
   };
 
   useEffect(() => {
-    registerOfflineHandler('startTrip', async (payload) => { await startTrip(payload.tripId); });
-    registerOfflineHandler('endTrip', async (payload) => { await endTrip(payload.tripId); });
-  }, []);
-
-  useEffect(() => {
     load();
     loadNotifications();
 
     const unsubTrips = user?.uid ? subscribeToDriverTrips(user.uid, setTrips) : undefined;
     const unsubNotifs = user?.uid ? subscribeToDriverNotifications(user.uid, setNotifications) : undefined;
+    const unsubTracking = onDriverTrackingChange(setIsTracking);
 
+    // Location sharing is intentionally NOT stopped on unmount: switching to another
+    // tab must not take the driver off the live map mid-trip.
     return () => {
       unsubTrips?.();
       unsubNotifs?.();
-      locationWatcher.current?.remove();
-      if (user) clearDriverTracking(user.uid).catch(() => {});
+      unsubTracking();
     };
   }, []);
 
@@ -90,36 +85,17 @@ export default function DriverHomeScreen({ onTabPress, onNavigateToTrip }: Props
   };
 
   const startGPS = async (activeTrip?: Trip) => {
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission denied', 'Location access is required to share your live position.');
-      return;
-    }
-    locationWatcher.current = await Location.watchPositionAsync(
-      { accuracy: Location.Accuracy.High, timeInterval: 10000, distanceInterval: 50 },
-      (pos) => {
-        if (!user) return;
-        updateDriverLocation(user.uid, {
-          driverName: user.displayName || user.email || 'Driver',
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-          updatedAt: Date.now(),
-          isTracking: true,
-          tripRoute: activeTrip
-            ? `${activeTrip.fromPlant || '?'} → ${activeTrip.toPlant || '?'}`
-            : undefined,
-        }).catch(() => {});
-      }
+    if (!user) return;
+    const granted = await startDriverTracking(
+      user,
+      activeTrip ? `${activeTrip.fromPlant || '?'} → ${activeTrip.toPlant || '?'}` : undefined
     );
-    setIsTracking(true);
+    if (!granted) {
+      Alert.alert('Permission denied', 'Location access is required to share your live position.');
+    }
   };
 
-  const stopGPS = () => {
-    locationWatcher.current?.remove();
-    locationWatcher.current = null;
-    if (user) clearDriverTracking(user.uid).catch(() => {});
-    setIsTracking(false);
-  };
+  const stopGPS = () => stopDriverTracking();
 
   const handleStartTrip = async (trip: Trip) => {
     Alert.alert(
@@ -131,20 +107,20 @@ export default function DriverHomeScreen({ onTabPress, onNavigateToTrip }: Props
           text: 'Start',
           onPress: async () => {
             setActionLoading(trip.id);
+            const startedAt = new Date();
             try {
               const net = await NetInfo.fetch();
               const online = net.isConnected && net.isInternetReachable !== false;
               if (!online) {
-                await enqueueOfflineOp('startTrip', { tripId: trip.id });
-                setTrips(prev => prev.map(t => (t.id === trip.id ? { ...t, status: 'active' } : t)));
+                await enqueueOfflineOp('startTrip', { tripId: trip.id, at: startedAt.toISOString() });
+                setTrips(prev => prev.map(t => (t.id === trip.id ? { ...t, status: 'active', departureTime: startedAt } : t)));
                 Alert.alert('Offline', 'No connection — this will sync automatically once you\'re back online.');
               } else {
-                await startTrip(trip.id);
-                await load();
+                await startTrip(trip.id, startedAt);
+                await load(); // also resumes GPS for the now-active trip
               }
-              // Auto-start GPS when trip begins (works offline too — location is queued server-side)
-              const updated = { ...trip, departureTime: new Date() };
-              await startGPS(updated);
+              // Auto-start GPS when the trip begins (no-op if load() already started it)
+              await startGPS({ ...trip, departureTime: startedAt });
             } catch {
               Alert.alert('Error', 'Could not start trip. Try again.');
             } finally {
@@ -167,16 +143,17 @@ export default function DriverHomeScreen({ onTabPress, onNavigateToTrip }: Props
           style: 'destructive',
           onPress: async () => {
             setActionLoading(trip.id);
+            const endedAt = new Date();
             try {
               const net = await NetInfo.fetch();
               const online = net.isConnected && net.isInternetReachable !== false;
               if (!online) {
-                await enqueueOfflineOp('endTrip', { tripId: trip.id });
-                setTrips(prev => prev.map(t => (t.id === trip.id ? { ...t, arrivalTime: new Date() } : t)));
+                await enqueueOfflineOp('endTrip', { tripId: trip.id, at: endedAt.toISOString() });
+                setTrips(prev => prev.map(t => (t.id === trip.id ? { ...t, arrivalTime: endedAt } : t)));
                 stopGPS();
                 Alert.alert('Offline', 'No connection — this will sync automatically once you\'re back online.');
               } else {
-                await endTrip(trip.id);
+                await endTrip(trip.id, endedAt);
                 stopGPS();
                 await load();
               }
@@ -195,7 +172,7 @@ export default function DriverHomeScreen({ onTabPress, onNavigateToTrip }: Props
   const now = new Date();
   const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
   // activeTrip = trip the driver has pressed "Start" on (status set to 'active' by startTrip())
-  const activeTrip = trips.find(t => t.status === 'active' && !t.arrivalTime);
+  const activeTrip = trips.find(isTripStarted);
   // recentTrips = last HOME_LIMIT, optionally filtered by search
   const recentTrips = (() => {
     if (!searchQ.trim()) return trips.slice(0, HOME_LIMIT);
@@ -209,9 +186,10 @@ export default function DriverHomeScreen({ onTabPress, onNavigateToTrip }: Props
   const todayCount = trips.filter(t => t.departureTime && t.departureTime >= todayStart).length;
   const completedCount = trips.filter(t => !!t.arrivalTime).length;
 
-  const getTripStatus = (t: Trip): 'pending' | 'in-progress' | 'completed' => {
+  const getTripStatus = (t: Trip): 'pending' | 'in-progress' | 'completed' | 'cancelled' => {
     if (!!t.arrivalTime) return 'completed';
-    if (t.status === 'active') return 'in-progress';
+    if ((t.status ?? '').toLowerCase() === 'cancelled') return 'cancelled';
+    if (isTripStarted(t)) return 'in-progress';
     return 'pending';
   };
 
@@ -372,6 +350,11 @@ export default function DriverHomeScreen({ onTabPress, onNavigateToTrip }: Props
                   {status === 'completed' && (
                     <View style={[s.statusBadge, { backgroundColor: Colors.successLight }]}>
                       <Text style={[s.statusBadgeText, { color: Colors.success }]}>Completed</Text>
+                    </View>
+                  )}
+                  {status === 'cancelled' && (
+                    <View style={[s.statusBadge, { backgroundColor: Colors.dangerLight }]}>
+                      <Text style={[s.statusBadgeText, { color: Colors.danger }]}>Cancelled</Text>
                     </View>
                   )}
                 </View>

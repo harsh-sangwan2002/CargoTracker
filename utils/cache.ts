@@ -41,6 +41,15 @@ export async function clearCache(...keys: string[]): Promise<void> {
   } catch {}
 }
 
+// Removes every cached entry plus the per-user role cache (MainTabsScreen's ct_role_*).
+export async function clearAllCache(): Promise<void> {
+  try {
+    const all = await AsyncStorage.getAllKeys();
+    const matched = all.filter(k => k.startsWith(PREFIX) || k.startsWith('ct_role_'));
+    if (matched.length) await AsyncStorage.multiRemove(matched);
+  } catch {}
+}
+
 export async function clearCacheByPrefix(prefix: string): Promise<void> {
   try {
     const all = await AsyncStorage.getAllKeys();

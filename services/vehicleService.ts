@@ -33,9 +33,10 @@ const mapVehicleRow = (row: any): Vehicle & { id: string } => ({
 
 const toVehicleRow = (vehicle: Partial<Vehicle>) => ({
   registration_number: vehicle.registrationNumber?.trim().toUpperCase(),
-  type: vehicle.type || null,
-  capacity_tons: vehicle.capacityTons ?? null,
-  fuel_type: vehicle.fuelType || null,
+  // undefined = not part of this update (partial updates must not wipe other fields)
+  type: vehicle.type === undefined ? undefined : (vehicle.type || null),
+  capacity_tons: 'capacityTons' in vehicle ? (vehicle.capacityTons ?? null) : undefined,
+  fuel_type: vehicle.fuelType === undefined ? undefined : (vehicle.fuelType || null),
   insurance_expiry: vehicle.insuranceExpiry !== undefined ? (vehicle.insuranceExpiry || null) : undefined,
   permit_expiry: vehicle.permitExpiry !== undefined ? (vehicle.permitExpiry || null) : undefined,
   puc_expiry: vehicle.pucExpiry !== undefined ? (vehicle.pucExpiry || null) : undefined,

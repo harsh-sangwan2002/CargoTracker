@@ -13,8 +13,6 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { createUserWithEmailAndPassword } from '../supabaseConfig';
-import { createUserProfile } from '../services/userService';
-import { addDriver } from '../services/driverService';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
 
 export default function RegisterScreen() {
@@ -42,28 +40,8 @@ export default function RegisterScreen() {
     try {
       const cred = await createUserWithEmailAndPassword(email.trim(), password);
       if (!cred.user?.id) throw new Error('Account created but user session was not returned.');
-      try {
-        await createUserProfile(cred.user.id, email.trim(), 'driver');
-      } catch {
-        // The database trigger on auth.users is the source of truth; this client write is only a fallback.
-      }
-      // Create a minimal driver record so managers see this user immediately in the driver list.
-      // If the manager already added a driver with this email, this merges into that existing record.
-      try {
-        await addDriver({
-          fullName: '',
-          age: 0,
-          address: '',
-          aadhaarCard: '',
-          panCard: '',
-          vehicleOwned: '',
-          photoUrl: '',
-          userId: cred.user.id,
-          email: email.trim().toLowerCase(),
-        });
-      } catch {
-        // Non-critical — driver can complete their profile to appear in the list.
-      }
+      // The profile (role: driver) is created by the database trigger, and the driver
+      // record is created/linked by claim_driver_record() on first sign-in (MainTabsScreen).
       Alert.alert('Account created', 'You have been registered as a driver. An admin can update your role if needed.');
     } catch (err: any) {
       const map: Record<string, string> = {

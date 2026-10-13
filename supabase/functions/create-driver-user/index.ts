@@ -12,9 +12,12 @@ interface RequestBody {
   fullName?: string;
 }
 
-function randomPassword(): string {
-  const value = crypto.getRandomValues(new Uint32Array(1))[0] % 9000;
-  return String(value + 1000);
+// 12 chars from an unambiguous alphabet (no 0/O/1/l/I) — easy to read out to a driver,
+// long enough to satisfy Supabase's minimum password length and resist guessing.
+function randomPassword(length = 12): string {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+  const bytes = crypto.getRandomValues(new Uint8Array(length));
+  return Array.from(bytes, b => alphabet[b % alphabet.length]).join('');
 }
 
 Deno.serve(async (req) => {
@@ -127,8 +130,9 @@ Deno.serve(async (req) => {
     // Race condition: the auth user was created after our profiles lookup above
     // (e.g. self-registration happening concurrently). Fall back to linking it.
     if (createError?.message?.toLowerCase().includes('already been registered')) {
-      const { data: users, error: listError } = await admin.auth.admin.listUsers();
-      const match = !listError && users?.users.find(u => u.email?.toLowerCase() === email);
+      // The auth trigger creates a profiles row for every auth user, so look it up
+      // there (listUsers() only returns the first page of users).
+      const { data: match } = await admin.from('profiles').select('id').eq('email', email).maybeSingle();
       if (match) {
         try {
           await linkExistingProfile(match.id);

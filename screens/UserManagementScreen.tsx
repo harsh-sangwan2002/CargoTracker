@@ -101,14 +101,19 @@ export default function UserManagementScreen() {
 
   const handleRoleChange = async () => {
     if (!selected) return;
+    if (!isUserAdmin) { Alert.alert('Access Denied', 'Only admins can assign roles.'); return; }
+    if (selected.uid === currentUser?.uid && pendingRole !== 'admin') {
+      Alert.alert('Not allowed', 'You cannot remove your own admin role. Ask another admin to do it.');
+      return;
+    }
     setSaving(true);
     try {
       await updateUserRole(selected.uid, pendingRole);
       setUsers(prev => prev.map(u => u.uid === selected.uid ? { ...u, role: pendingRole } : u));
       setRoleModal(false);
       setSelected(null);
-    } catch {
-      Alert.alert('Error', 'Failed to update role.');
+    } catch (e: any) {
+      Alert.alert('Error', e?.message ?? 'Failed to update role.');
     } finally {
       setSaving(false);
     }
@@ -224,9 +229,11 @@ export default function UserManagementScreen() {
                     <Text style={[s.roleText, { color: cfg.color }]}>{cfg.label}</Text>
                   </View>
                 </View>
-                <TouchableOpacity style={s.editRoleBtn} onPress={() => openRoleModal(item)} activeOpacity={0.85}>
-                  <Text style={s.editRoleBtnText}>Change Role</Text>
-                </TouchableOpacity>
+                {isUserAdmin && (
+                  <TouchableOpacity style={s.editRoleBtn} onPress={() => openRoleModal(item)} activeOpacity={0.85}>
+                    <Text style={s.editRoleBtnText}>Change Role</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             );
           }}

@@ -5,8 +5,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { auth } from '../supabaseConfig';
 import { getUserProfile } from '../services/userService';
-import { getDriverByUserId, getDriverByEmail, linkDriverToUser } from '../services/driverService';
+import { claimDriverRecord, getDriverById } from '../services/driverService';
 import { registerForPushNotifications } from '../utils/pushNotifications';
+import { stopDriverTracking } from '../utils/driverTracking';
 import { Colors, FontSize, Shadow } from '../utils/theme';
 import DashboardScreen from './DashboardScreen';
 import DriverHomeScreen from './DriverHomeScreen';
@@ -50,10 +51,13 @@ export default function MainTabsScreen() {
   useEffect(() => {
     if (!user?.uid) { setLoadingRole(false); return; }
     const cacheKey = `ct_role_${user.uid}`;
+    let fetched = false;
     AsyncStorage.getItem(cacheKey).then(cached => {
-      if (cached) { setRole(cached as UserRole); setLoadingRole(false); }
+      // the cached role only bridges the wait; never let it overwrite a fresh one
+      if (cached && !fetched) { setRole(cached as UserRole); setLoadingRole(false); }
     }).catch(() => {});
     getUserProfile(user.uid).then(profile => {
+      fetched = true;
       if (profile?.role) {
         setRole(profile.role as UserRole);
         AsyncStorage.setItem(cacheKey, profile.role).catch(() => {});
@@ -80,29 +84,19 @@ export default function MainTabsScreen() {
   // Check driver profile completeness + auto-link admin-created record
   useEffect(() => {
     if (role !== 'driver' || !user?.uid) return;
-    const uid = user.uid;
-    const email = (user.email ?? '').trim().toLowerCase();
     (async () => {
       try {
-        const byUid = await getDriverByUserId(uid);
-        if (byUid) {
-          setProfileComplete(!!byUid.fullName?.trim());
-          return;
-        }
-        if (email) {
-          const byEmail = await getDriverByEmail(email);
-          if (byEmail) {
-            await linkDriverToUser(byEmail.id, uid);
-            setProfileComplete(!!byEmail.fullName?.trim());
-            return;
-          }
-        }
-        setProfileComplete(false);
+        const driverId = await claimDriverRecord();
+        const driver = driverId ? await getDriverById(driverId) : null;
+        setProfileComplete(!!driver?.fullName?.trim());
       } catch {
         setProfileComplete(false);
       }
     })();
   }, [role]);
+
+  // MainTabs unmounts on sign-out: make sure no location watcher outlives the session.
+  useEffect(() => () => stopDriverTracking(), []);
 
   const visibleTabs = ALL_TABS.filter(
     tab => !tab.roles || tab.roles.includes(role)
