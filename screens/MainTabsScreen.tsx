@@ -5,7 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { auth } from '../supabaseConfig';
 import { getUserProfile } from '../services/userService';
-import { getDriverByUserId, getDriverByEmail, linkDriverToUser } from '../services/driverService';
+import { getMyDriverProfile } from '../services/driverService';
 import { registerForPushNotifications } from '../utils/pushNotifications';
 import { Colors, FontSize, Shadow } from '../utils/theme';
 import DashboardScreen from './DashboardScreen';
@@ -77,31 +77,13 @@ export default function MainTabsScreen() {
     registerForPushNotifications(user.uid).catch(() => {});
   }, [user?.uid]);
 
-  // Check driver profile completeness + auto-link admin-created record
+  // Check driver profile completeness. getMyDriverProfile() also links an
+  // admin-created record with this driver's confirmed email (server-side).
   useEffect(() => {
     if (role !== 'driver' || !user?.uid) return;
-    const uid = user.uid;
-    const email = (user.email ?? '').trim().toLowerCase();
-    (async () => {
-      try {
-        const byUid = await getDriverByUserId(uid);
-        if (byUid) {
-          setProfileComplete(!!byUid.fullName?.trim());
-          return;
-        }
-        if (email) {
-          const byEmail = await getDriverByEmail(email);
-          if (byEmail) {
-            await linkDriverToUser(byEmail.id, uid);
-            setProfileComplete(!!byEmail.fullName?.trim());
-            return;
-          }
-        }
-        setProfileComplete(false);
-      } catch {
-        setProfileComplete(false);
-      }
-    })();
+    getMyDriverProfile()
+      .then(profile => setProfileComplete(!!profile?.fullName?.trim()))
+      .catch(() => setProfileComplete(false));
   }, [role]);
 
   const visibleTabs = ALL_TABS.filter(

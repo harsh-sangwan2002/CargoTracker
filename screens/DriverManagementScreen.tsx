@@ -21,8 +21,11 @@ import * as Clipboard from 'expo-clipboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { auth } from '../supabaseConfig';
-import { getDrivers, addDriver, updateDriver, deleteDriver, createDriverAccount, getDriverByEmail, Driver } from '../services/driverService';
-import { convertImageToBase64 } from '../services/userService';
+import {
+  getDrivers, addDriver, updateDriver, deleteDriver, createDriverAccount, getDriverByEmail, getDriverPii,
+  setDriverPhoto, resolveDriverPhotoUrls, isLocalImageUri, maskId, Driver,
+} from '../services/driverService';
+import { getUserProfile } from '../services/userService';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
 import { ShimmerRow } from '../components/Shimmer';
 
@@ -49,14 +52,18 @@ interface DriverFormProps {
   submitLabel: string;
   saving: boolean;
   onPickImage: (isEdit: boolean) => void;
+  photoUri?: string;
+  // Editing as a manager: existing Aadhaar/PAN are admin-only, so the fields
+  // start blank and are only written if filled in.
+  piiOptional?: boolean;
 }
 
-function DriverForm({ f, setF, onSave, onCancel, submitLabel, saving, onPickImage }: DriverFormProps) {
+function DriverForm({ f, setF, onSave, onCancel, submitLabel, saving, onPickImage, photoUri, piiOptional }: DriverFormProps) {
   return (
     <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
       <TouchableOpacity style={fms.photoBtn} onPress={() => onPickImage(submitLabel === 'Save Changes')} activeOpacity={0.8}>
-        {f.photoUrl ? (
-          <Image source={{ uri: f.photoUrl }} style={fms.photoImg} resizeMode="cover" />
+        {photoUri ? (
+          <Image source={{ uri: photoUri }} style={fms.photoImg} resizeMode="cover" />
         ) : (
           <View style={fms.photoPlaceholder}>
             <Text style={fms.photoPlaceholderIcon}>📷</Text>
@@ -70,8 +77,8 @@ function DriverForm({ f, setF, onSave, onCancel, submitLabel, saving, onPickImag
         { key: 'age', label: 'Age * (18–80)', keyboardType: 'numeric' as const, placeholder: '25' },
         { key: 'email', label: 'Email (for account linking)', keyboardType: 'email-address' as const, autoCapitalize: 'none' as const, placeholder: 'driver@example.com' },
         { key: 'vehicleOwned', label: 'Vehicle *', autoCapitalize: 'characters' as const, placeholder: 'HR26AB1234' },
-        { key: 'aadhaarCard', label: 'Aadhaar * (12 digits)', keyboardType: 'numeric' as const, maxLength: 12, placeholder: '123456789012' },
-        { key: 'panCard', label: 'PAN Card *', autoCapitalize: 'characters' as const, maxLength: 10, placeholder: 'ABCDE1234F' },
+        { key: 'aadhaarCard', label: piiOptional ? 'Aadhaar (admin-only, leave blank to keep)' : 'Aadhaar * (12 digits)', keyboardType: 'numeric' as const, maxLength: 12, placeholder: piiOptional ? 'Unchanged' : '123456789012' },
+        { key: 'panCard', label: piiOptional ? 'PAN Card (admin-only, leave blank to keep)' : 'PAN Card *', autoCapitalize: 'characters' as const, maxLength: 10, placeholder: piiOptional ? 'Unchanged' : 'ABCDE1234F' },
         { key: 'licenseNumber', label: 'License Number (optional)', autoCapitalize: 'characters' as const, placeholder: 'DL-1420110012345' },
         { key: 'licenseExpiry', label: 'License Expiry (optional, YYYY-MM-DD)', placeholder: '2027-01-31' },
       ].map(field => (
@@ -131,6 +138,35 @@ export default function DriverManagementScreen() {
   const [form, setForm] = useState(emptyForm);
   const [editForm, setEditForm] = useState(emptyForm);
   const [credentialsModal, setCredentialsModal] = useState<{ email: string; password?: string; linkedExisting?: boolean } | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  // storage path / legacy data URL -> displayable URI (signed URLs expire in 1h)
+  const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
+  // Aadhaar/PAN of the selected driver, fetched on demand for admins only
+  const [pii, setPii] = useState<{ aadhaarCard: string; panCard: string } | null>(null);
+  const [showPii, setShowPii] = useState(false);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    getUserProfile(user.uid).then(p => setIsAdmin(p?.role === 'admin')).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    setPii(null);
+    setShowPii(false);
+  }, [selected?.id]);
+
+  const photoUriFor = (stored?: string) => (stored ? (isLocalImageUri(stored) ? stored : photoUrls[stored]) : undefined);
+
+  const loadPii = async (driverId: string) => {
+    try {
+      const data = await getDriverPii(driverId);
+      setPii(data);
+      return data;
+    } catch {
+      Alert.alert('Error', 'Could not load Aadhaar/PAN.');
+      return null;
+    }
+  };
 
   const addSwipeY = useRef(new Animated.Value(0)).current;
   const addModalPan = useRef(PanResponder.create({
@@ -165,6 +201,7 @@ export default function DriverManagementScreen() {
     try {
       const data = await getDrivers();
       setDrivers(data);
+      resolveDriverPhotoUrls(data.map(d => d.photoUrl)).then(setPhotoUrls).catch(() => {});
     } catch (e) {
       Alert.alert('Error', 'Failed to load drivers.');
     } finally {
@@ -195,8 +232,8 @@ export default function DriverManagementScreen() {
     if (!perm.granted) { Alert.alert('Permission Denied', 'Camera access required.'); return; }
     const res = await ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [1, 1], quality: 0.7 });
     if (!res.canceled && res.assets[0]) {
-      const b64 = await convertImageToBase64(res.assets[0].uri);
-      isEdit ? setEditField('photoUrl', b64) : setField('photoUrl', b64);
+      // kept as a local file URI until save, then uploaded to Storage
+      isEdit ? setEditField('photoUrl', res.assets[0].uri) : setField('photoUrl', res.assets[0].uri);
     }
   };
 
@@ -205,16 +242,17 @@ export default function DriverManagementScreen() {
     if (!perm.granted) { Alert.alert('Permission Denied', 'Gallery access required.'); return; }
     const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [1, 1], quality: 0.7 });
     if (!res.canceled && res.assets[0]) {
-      const b64 = await convertImageToBase64(res.assets[0].uri);
-      isEdit ? setEditField('photoUrl', b64) : setField('photoUrl', b64);
+      // kept as a local file URI until save, then uploaded to Storage
+      isEdit ? setEditField('photoUrl', res.assets[0].uri) : setField('photoUrl', res.assets[0].uri);
     }
   };
 
-  const validate = (f: typeof emptyForm) => {
-    if (!f.fullName.trim() || !f.age.trim() || !f.address.trim() || !f.aadhaarCard.trim() || !f.panCard.trim() || !f.vehicleOwned.trim()) return 'Please fill all required fields.';
+  const validate = (f: typeof emptyForm, piiOptional = false) => {
+    const piiMissing = !piiOptional && (!f.aadhaarCard.trim() || !f.panCard.trim());
+    if (!f.fullName.trim() || !f.age.trim() || !f.address.trim() || piiMissing || !f.vehicleOwned.trim()) return 'Please fill all required fields.';
     if (!/^\d+$/.test(f.age) || parseInt(f.age) < 18 || parseInt(f.age) > 80) return 'Age must be between 18 and 80.';
-    if (!/^\d{12}$/.test(f.aadhaarCard.replace(/\s/g, ''))) return 'Aadhaar must be exactly 12 digits.';
-    if (!/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(f.panCard.toUpperCase())) return 'Invalid PAN card format (e.g. ABCDE1234F).';
+    if (f.aadhaarCard.trim() && !/^\d{12}$/.test(f.aadhaarCard.replace(/\s/g, ''))) return 'Aadhaar must be exactly 12 digits.';
+    if (f.panCard.trim() && !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(f.panCard.toUpperCase())) return 'Invalid PAN card format (e.g. ABCDE1234F).';
     if (f.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email.trim())) return 'Invalid email address.';
     if (f.licenseExpiry.trim() && !/^\d{4}-\d{2}-\d{2}$/.test(f.licenseExpiry.trim())) return 'License expiry must be in YYYY-MM-DD format.';
     return null;
@@ -227,19 +265,22 @@ export default function DriverManagementScreen() {
     try {
       const email = form.email.trim().toLowerCase();
       const existing = email ? await getDriverByEmail(email) : null;
-      await addDriver({
+      const driverId = await addDriver({
         fullName: form.fullName.trim(),
         age: parseInt(form.age),
         address: form.address.trim(),
         aadhaarCard: form.aadhaarCard.trim(),
         panCard: form.panCard.trim().toUpperCase(),
         vehicleOwned: form.vehicleOwned.trim().toUpperCase(),
-        photoUrl: form.photoUrl,
         email,
-        userId: '',
         licenseNumber: form.licenseNumber.trim(),
         licenseExpiry: form.licenseExpiry.trim(),
       });
+      if (isLocalImageUri(form.photoUrl)) {
+        await setDriverPhoto(driverId, form.photoUrl, existing?.photoUrl).catch(() =>
+          Alert.alert('Photo not saved', 'The driver was saved but the photo upload failed. Try adding it again.')
+        );
+      }
       Alert.alert(
         'Success',
         existing
@@ -258,10 +299,11 @@ export default function DriverManagementScreen() {
 
   const handleSaveEdit = async () => {
     if (!selected) return;
-    const err = validate(editForm);
+    const err = validate(editForm, !isAdmin);
     if (err) { Alert.alert('Validation Error', err); return; }
     setSaving(true);
     try {
+      // Blank Aadhaar/PAN are omitted by the service, leaving stored values intact.
       await updateDriver(selected.id, {
         fullName: editForm.fullName.trim(),
         age: parseInt(editForm.age),
@@ -269,11 +311,13 @@ export default function DriverManagementScreen() {
         aadhaarCard: editForm.aadhaarCard.trim(),
         panCard: editForm.panCard.trim().toUpperCase(),
         vehicleOwned: editForm.vehicleOwned.trim().toUpperCase(),
-        photoUrl: editForm.photoUrl || selected.photoUrl,
         email: editForm.email.trim().toLowerCase(),
         licenseNumber: editForm.licenseNumber.trim(),
         licenseExpiry: editForm.licenseExpiry.trim(),
       });
+      if (isLocalImageUri(editForm.photoUrl)) {
+        await setDriverPhoto(selected.id, editForm.photoUrl, selected.photoUrl);
+      }
       setIsEditing(false);
       setViewModal(false);
       setSelected(null);
@@ -379,8 +423,8 @@ export default function DriverManagementScreen() {
               onPress={() => { setSelected(item); setIsEditing(false); setViewModal(true); }}
               activeOpacity={0.85}
             >
-              {item.photoUrl ? (
-                <Image source={{ uri: item.photoUrl }} style={s.avatar} resizeMode="cover" />
+              {photoUriFor(item.photoUrl) ? (
+                <Image source={{ uri: photoUriFor(item.photoUrl) }} style={s.avatar} resizeMode="cover" />
               ) : (
                 <View style={[s.avatar, s.avatarPlaceholder]}>
                   <Text style={s.avatarInitial}>{item.fullName[0]?.toUpperCase()}</Text>
@@ -420,6 +464,7 @@ export default function DriverManagementScreen() {
               submitLabel="Add Driver"
               saving={saving}
               onPickImage={pickImage}
+              photoUri={photoUriFor(form.photoUrl)}
             />
           </Animated.View>
         </KeyboardAvoidingView>
@@ -443,11 +488,13 @@ export default function DriverManagementScreen() {
                 submitLabel="Save Changes"
                 saving={saving}
                 onPickImage={pickImage}
+                photoUri={photoUriFor(editForm.photoUrl)}
+                piiOptional={!isAdmin}
               />
             ) : (
               <ScrollView showsVerticalScrollIndicator={false}>
-                {selected?.photoUrl ? (
-                  <Image source={{ uri: selected.photoUrl }} style={dv.photo} resizeMode="cover" />
+                {photoUriFor(selected?.photoUrl) ? (
+                  <Image source={{ uri: photoUriFor(selected?.photoUrl) }} style={dv.photo} resizeMode="cover" />
                 ) : (
                   <View style={[dv.photo, dv.photoPlaceholder]}>
                     <Text style={dv.photoInitial}>{selected?.fullName[0]?.toUpperCase()}</Text>
@@ -458,8 +505,6 @@ export default function DriverManagementScreen() {
                   { label: 'Age', value: selected?.age?.toString() },
                   { label: 'Vehicle', value: selected?.vehicleOwned },
                   { label: 'Address', value: selected?.address },
-                  { label: 'Aadhaar', value: selected?.aadhaarCard },
-                  { label: 'PAN Card', value: selected?.panCard },
                   { label: 'License No.', value: selected?.licenseNumber },
                   { label: 'License Expiry', value: selected?.licenseExpiry },
                   { label: 'Email', value: (selected as any)?.email || '—' },
@@ -469,6 +514,32 @@ export default function DriverManagementScreen() {
                     <Text style={dv.value}>{row.value || '—'}</Text>
                   </View>
                 ))}
+                {/* Aadhaar / PAN: admin-only, masked until explicitly revealed */}
+                {[
+                  { label: 'Aadhaar', value: pii?.aadhaarCard },
+                  { label: 'PAN Card', value: pii?.panCard },
+                ].map(row => (
+                  <View key={row.label} style={dv.row}>
+                    <Text style={dv.label}>{row.label}</Text>
+                    <Text style={dv.value}>
+                      {!isAdmin ? 'Restricted' : showPii ? (row.value || '—') : (pii ? (maskId(row.value) || '—') : '••••')}
+                    </Text>
+                  </View>
+                ))}
+                {isAdmin && (
+                  <TouchableOpacity
+                    onPress={async () => {
+                      if (showPii) { setShowPii(false); return; }
+                      if (selected && (pii || await loadPii(selected.id))) setShowPii(true);
+                    }}
+                    activeOpacity={0.7}
+                    style={{ alignSelf: 'flex-end' as const, paddingVertical: Spacing[1], marginBottom: Spacing[2] }}
+                  >
+                    <Text style={{ color: Colors.primary, fontWeight: '600' as const, fontSize: FontSize.sm }}>
+                      {showPii ? 'Hide Aadhaar / PAN' : 'Show Aadhaar / PAN'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
                 <View style={dv.row}>
                   <Text style={dv.label}>Account</Text>
                   <View style={[dv.statusBadge, { backgroundColor: selected?.userId ? '#d1fae5' : '#fef3c7' }]}>
@@ -499,7 +570,26 @@ export default function DriverManagementScreen() {
                   <Text style={dv.editBtnText}>View Trips</Text>
                 </TouchableOpacity>
                 <View style={dv.btns}>
-                  <TouchableOpacity style={dv.editBtn} onPress={() => { setEditForm({ fullName: selected!.fullName, age: selected!.age.toString(), address: selected!.address, aadhaarCard: selected!.aadhaarCard, panCard: selected!.panCard, vehicleOwned: selected!.vehicleOwned ?? '', photoUrl: selected!.photoUrl, email: (selected as any).email ?? '', licenseNumber: selected!.licenseNumber ?? '', licenseExpiry: selected!.licenseExpiry ?? '' }); setIsEditing(true); }} activeOpacity={0.85}>
+                  <TouchableOpacity
+                    style={dv.editBtn}
+                    onPress={async () => {
+                      const current = isAdmin ? (pii ?? await loadPii(selected!.id)) : null;
+                      setEditForm({
+                        fullName: selected!.fullName,
+                        age: selected!.age.toString(),
+                        address: selected!.address,
+                        aadhaarCard: current?.aadhaarCard ?? '',
+                        panCard: current?.panCard ?? '',
+                        vehicleOwned: selected!.vehicleOwned ?? '',
+                        photoUrl: selected!.photoUrl,
+                        email: (selected as any).email ?? '',
+                        licenseNumber: selected!.licenseNumber ?? '',
+                        licenseExpiry: selected!.licenseExpiry ?? '',
+                      });
+                      setIsEditing(true);
+                    }}
+                    activeOpacity={0.85}
+                  >
                     <Text style={dv.editBtnText}>Edit</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={dv.deleteBtn} onPress={handleDelete} activeOpacity={0.85}>

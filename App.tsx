@@ -6,6 +6,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { onAuthStateChanged } from './supabaseConfig';
 import { Colors, FontSize, Radius, Shadow, Spacing } from './utils/theme';
 import { initOfflineQueueSync } from './utils/offlineQueue';
+import { initMonitoring, setMonitoringUser, wrapRoot } from './utils/monitoring';
 
 import LoginScreen from './screens/LoginScreen';
 import RegisterScreen from './screens/RegisterScreen';
@@ -16,6 +17,9 @@ import UserManagementScreen from './screens/UserManagementScreen';
 import PlantManagementScreen from './screens/PlantManagementScreen';
 import VehicleManagementScreen from './screens/VehicleManagementScreen';
 import LiveMapScreen from './screens/LiveMapScreen';
+import FleetHealthScreen from './screens/FleetHealthScreen';
+
+initMonitoring();
 
 const Stack = createNativeStackNavigator();
 
@@ -29,9 +33,10 @@ export type RootStackParamList = {
   PlantManagement: undefined;
   VehicleManagement: undefined;
   LiveMap: undefined;
+  FleetHealth: undefined;
 };
 
-export default function App() {
+function App() {
   const [user, setUser] = useState<any>(undefined);
 
   useEffect(() => {
@@ -43,6 +48,7 @@ export default function App() {
     let unsubscribe: (() => void) | undefined;
 
     onAuthStateChanged((supabaseUser) => {
+      setMonitoringUser(supabaseUser?.uid ?? null);
       if (mounted) setUser(supabaseUser);
     }).then((cleanup) => {
       unsubscribe = cleanup;
@@ -101,6 +107,11 @@ export default function App() {
                 component={LiveMapScreen}
                 options={{ animation: 'slide_from_right' }}
               />
+              <Stack.Screen
+                name="FleetHealth"
+                component={FleetHealthScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
             </>
           ) : (
             <>
@@ -114,3 +125,5 @@ export default function App() {
     </SafeAreaProvider>
   );
 }
+
+export default wrapRoot(App);

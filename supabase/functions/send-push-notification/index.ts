@@ -22,24 +22,21 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: 'Missing Authorization header' }), { status: 401 });
   }
 
-  const callerClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
-    global: { headers: { Authorization: authHeader } },
-  });
+  const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
-  const { data: callerData, error: callerError } = await callerClient.auth.getUser();
+  const jwt = authHeader.replace(/^Bearer\s+/i, '');
+  const { data: callerData, error: callerError } = await admin.auth.getUser(jwt);
   if (callerError || !callerData?.user) {
     return new Response(JSON.stringify({ error: 'Invalid session' }), { status: 401 });
   }
 
-  const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
-
   const { data: callerProfile, error: profileError } = await admin
     .from('profiles')
-    .select('role')
+    .select('role, is_active')
     .eq('id', callerData.user.id)
     .maybeSingle();
 
-  if (profileError || !['admin', 'manager'].includes(callerProfile?.role ?? '')) {
+  if (profileError || !callerProfile?.is_active || !['admin', 'manager'].includes(callerProfile?.role ?? '')) {
     return new Response(JSON.stringify({ error: 'Only staff can send driver push notifications' }), { status: 403 });
   }
 
@@ -52,6 +49,9 @@ Deno.serve(async (req) => {
 
   if (!body.driverUserId || !body.title || !body.body) {
     return new Response(JSON.stringify({ error: 'driverUserId, title and body are required' }), { status: 400 });
+  }
+  if (String(body.title).length > 120 || String(body.body).length > 500) {
+    return new Response(JSON.stringify({ error: 'title or body too long' }), { status: 400 });
   }
 
   const { data: tokenRow } = await admin
@@ -81,8 +81,8 @@ Deno.serve(async (req) => {
   });
 
   if (!pushResponse.ok) {
-    const detail = await pushResponse.text();
-    return new Response(JSON.stringify({ error: `Expo push send failed: ${detail}` }), { status: 502 });
+    console.error(JSON.stringify({ fn: 'send-push-notification', status: pushResponse.status, detail: await pushResponse.text() }));
+    return new Response(JSON.stringify({ error: 'Push delivery failed' }), { status: 502 });
   }
 
   return new Response(JSON.stringify({ sent: true }), {

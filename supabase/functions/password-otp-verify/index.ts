@@ -19,91 +19,84 @@ async function hashOtp(otp: string): Promise<string> {
     .join('');
 }
 
+const MAX_ATTEMPTS = 5;
+const MIN_PASSWORD_LENGTH = 8;
+
+// Constant-time comparison of two hex digests.
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+const fail = (status: number, error: string) =>
+  new Response(JSON.stringify({ error }), { status, headers: CORS_HEADERS });
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS_HEADERS });
-  if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405, headers: CORS_HEADERS });
-  }
+  if (req.method !== 'POST') return fail(405, 'Method not allowed');
 
   let body: { email?: string; otp?: string; newPassword?: string };
   try {
     body = await req.json();
   } catch {
-    return new Response(JSON.stringify({ error: 'Invalid JSON body' }), { status: 400, headers: CORS_HEADERS });
+    return fail(400, 'Invalid JSON body');
   }
 
   const email = body.email?.trim().toLowerCase();
   const otp = body.otp?.trim();
   const newPassword = body.newPassword;
 
-  if (!email || !otp || !newPassword) {
-    return new Response(
-      JSON.stringify({ error: 'email, otp, and newPassword are required' }),
-      { status: 400, headers: CORS_HEADERS }
-    );
-  }
-
-  if (newPassword.length < 6) {
-    return new Response(
-      JSON.stringify({ error: 'Password must be at least 6 characters.' }),
-      { status: 400, headers: CORS_HEADERS }
-    );
+  if (!email || !otp || !newPassword) return fail(400, 'email, otp, and newPassword are required');
+  if (!/^\d{6}$/.test(otp)) return fail(400, 'The code must be 6 digits.');
+  if (newPassword.length < MIN_PASSWORD_LENGTH || newPassword.length > 72) {
+    return fail(400, `Password must be between ${MIN_PASSWORD_LENGTH} and 72 characters.`);
   }
 
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
-  // Fetch the most recent active OTP for this email
   const { data: record } = await admin
     .from('password_reset_otps')
-    .select('id, otp_hash, expires_at, used')
+    .select('id, otp_hash, expires_at, attempts')
     .eq('email', email)
     .eq('used', false)
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
 
-  if (!record) {
-    return new Response(
-      JSON.stringify({ error: 'No active OTP found. Please request a new code.' }),
-      { status: 400, headers: CORS_HEADERS }
-    );
-  }
+  // One message for "no code", "expired" and "wrong" keeps responses uninformative.
+  const invalid = () => fail(400, 'Invalid or expired code. Please request a new one.');
 
-  if (new Date(record.expires_at) < new Date()) {
-    return new Response(
-      JSON.stringify({ error: 'OTP has expired. Please request a new code.' }),
-      { status: 400, headers: CORS_HEADERS }
-    );
-  }
+  if (!record || new Date(record.expires_at) < new Date()) return invalid();
 
-  const inputHash = await hashOtp(otp);
-  if (inputHash !== record.otp_hash) {
-    return new Response(
-      JSON.stringify({ error: 'Incorrect OTP code. Check the email and try again.' }),
-      { status: 400, headers: CORS_HEADERS }
-    );
+  // Count the attempt atomically before comparing, so parallel guesses can't all
+  // slip in under the limit; the code is burnt once the limit is reached.
+  const { data: attempts, error: bumpError } = await admin.rpc('register_otp_attempt', {
+    p_id: record.id,
+    p_max_attempts: MAX_ATTEMPTS,
+  });
+  if (bumpError || typeof attempts !== 'number' || attempts > MAX_ATTEMPTS) return invalid();
+
+  if (!safeEqual(await hashOtp(otp), record.otp_hash)) {
+    if (attempts >= MAX_ATTEMPTS) return fail(429, 'Too many incorrect attempts. Please request a new code.');
+    return invalid();
   }
 
   // Mark OTP as used before updating password (prevent replay)
   await admin.from('password_reset_otps').update({ used: true }).eq('id', record.id);
 
-  // Look up the auth user by email
-  const { data: usersPage, error: listError } = await admin.auth.admin.listUsers({ perPage: 1000 });
-  if (listError) {
-    return new Response(JSON.stringify({ error: 'Failed to find user.' }), { status: 500, headers: CORS_HEADERS });
-  }
+  const { data: profile } = await admin
+    .from('profiles')
+    .select('id, is_active')
+    .eq('email', email)
+    .maybeSingle();
+  if (!profile?.is_active) return invalid();
 
-  const user = usersPage.users.find(u => u.email?.toLowerCase() === email);
-  if (!user) {
-    return new Response(JSON.stringify({ error: 'User account not found.' }), { status: 404, headers: CORS_HEADERS });
-  }
-
-  const { error: updateError } = await admin.auth.admin.updateUserById(user.id, { password: newPassword });
+  const { error: updateError } = await admin.auth.admin.updateUserById(profile.id, { password: newPassword });
   if (updateError) {
-    return new Response(
-      JSON.stringify({ error: updateError.message }),
-      { status: 500, headers: CORS_HEADERS }
-    );
+    console.error(JSON.stringify({ fn: 'password-otp-verify', stage: 'update', error: updateError.message }));
+    return fail(500, 'Could not update the password. Try again.');
   }
 
   return new Response(JSON.stringify({ success: true }), { status: 200, headers: CORS_HEADERS });

@@ -2118,6 +2118,31 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
+  - RNSentry (7.2.0):
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-hermes
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Sentry/HybridSDK (= 8.56.1)
+    - Yoga
+  - Sentry/HybridSDK (8.56.1)
   - UMAppLoader (6.0.8)
   - Yoga (0.0.0)
   - ZXingObjC/Core (3.6.9)
@@ -2226,11 +2251,13 @@ DEPENDENCIES:
   - "RNDateTimePicker (from `../node_modules/@react-native-community/datetimepicker`)"
   - RNGestureHandler (from `../node_modules/react-native-gesture-handler`)
   - RNScreens (from `../node_modules/react-native-screens`)
+  - "RNSentry (from `../node_modules/@sentry/react-native`)"
   - UMAppLoader (from `../node_modules/unimodules-app-loader/ios`)
   - Yoga (from `../node_modules/react-native/ReactCommon/yoga`)
 
 SPEC REPOS:
   trunk:
+    - Sentry
     - ZXingObjC
 
 EXTERNAL SOURCES:
@@ -2431,6 +2458,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native-gesture-handler"
   RNScreens:
     :path: "../node_modules/react-native-screens"
+  RNSentry:
+    :path: "../node_modules/@sentry/react-native"
   UMAppLoader:
     :path: "../node_modules/unimodules-app-loader/ios"
   Yoga:
@@ -2535,6 +2564,8 @@ SPEC CHECKSUMS:
   RNDateTimePicker: be0e44bcb9ed0607c7c5f47dbedd88cf091f6791
   RNGestureHandler: 2914750df066d89bf9d8f48a10ad5f0051108ac3
   RNScreens: d8d6f1792f6e7ac12b0190d33d8d390efc0c1845
+  RNSentry: 41979b419908128847ef662cc130a400b7576fa9
+  Sentry: b3ec44d01708fce73f99b544beb57e890eca4406
   UMAppLoader: 145337733539f9af9b3dd97eeaa7f3bd97cacb23
   Yoga: 5934998fbeaef7845dbf698f698518695ab4cd1a
   ZXingObjC: 8898711ab495761b2dbbdec76d90164a6d7e14c5

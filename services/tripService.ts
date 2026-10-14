@@ -1,5 +1,6 @@
 import { supabase } from '../supabaseConfig';
 import { getCache, setCache, clearCacheByPrefix, TTL } from '../utils/cache';
+import { effectiveNow } from '../utils/offlineQueue';
 
 export interface TripRecord {
   truck: string;
@@ -25,8 +26,15 @@ export interface TripRecord {
   odometerStart?: number;
   odometerEnd?: number;
   tripNumber?: string;
+  tripStatus?: 'pending' | 'active' | 'completed' | 'cancelled';
   createdAt: any;
 }
+
+// Numeric columns are the source of truth (the odometer trigger fills
+// distance_travelled_km; the legacy text columns may be stale or '0'). Fall back
+// to the text columns only for rows that predate the numeric ones.
+const numericOrLegacy = (numeric: any, legacy: any, fallback: string) =>
+  numeric !== null && numeric !== undefined ? String(numeric) : (legacy ?? fallback);
 
 const toDate = (value: any): Date => value ? new Date(value) : new Date(0);
 const nullableDate = (value: any): Date | null => value ? new Date(value) : null;
@@ -40,13 +48,14 @@ const mapRow = (row: any): TripRecord & { id: string } => ({
   companyName: row.company_name ?? '',
   itemType: row.item_type ?? '',
   quantity: row.quantity ?? '',
-  fuelFilled: row.fuel_filled ?? '0',
-  distanceTravelled: row.distance_travelled ?? '',
+  fuelFilled: numericOrLegacy(row.fuel_filled_liters, row.fuel_filled, '0'),
+  distanceTravelled: numericOrLegacy(row.distance_travelled_km, row.distance_travelled, ''),
   departureTime: toDate(row.departure_time),
   arrivalTime: nullableDate(row.arrival_time),
   fromPlant: row.from_plant ?? '',
   toPlant: row.to_plant ?? '',
   status: row.status ?? '',
+  tripStatus: row.trip_status ?? undefined,
   time: row.time ?? '',
   userId: row.user_id ?? '',
   driverUserId: row.driver_user_id ?? '',
@@ -151,11 +160,12 @@ export const getTripsByDateRange = async (
   let query = supabase
     .from('trips')
     .select('*')
-    .gte('created_at', startDate.toISOString())
-    .lte('created_at', endDate.toISOString())
-    .order('created_at', { ascending: false });
+    .gte('departure_time', startDate.toISOString())
+    .lte('departure_time', endDate.toISOString())
+    .order('departure_time', { ascending: false });
 
-  if (userId) query = query.eq('user_id', userId);
+  // user_id is the trip's creator; the assigned driver is driver_user_id.
+  if (userId) query = query.eq('driver_user_id', userId);
 
   const { data, error } = await query;
   if (error) throw error;
@@ -168,19 +178,35 @@ export const updateTrip = async (id: string, data: Partial<TripRecord>) => {
   await invalidateTripCache();
 };
 
-export const startTrip = async (id: string) => {
+const validOdometer = (value?: number) =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+
+// Times come from effectiveNow(): when replayed from the offline queue they are
+// the moment the driver tapped, not when connectivity came back.
+export const startTrip = async (id: string, opts: { odometerStart?: number } = {}) => {
   const { error } = await supabase
     .from('trips')
-    .update({ departure_time: new Date().toISOString(), status: 'active', trip_status: 'active' })
+    .update(compactRow({
+      departure_time: effectiveNow().toISOString(),
+      status: 'active',
+      trip_status: 'active',
+      odometer_start: validOdometer(opts.odometerStart),
+    }))
     .eq('id', id);
   if (error) throw error;
   await invalidateTripCache();
 };
 
-export const endTrip = async (id: string) => {
+// distance_travelled_km is computed server-side from the odometer readings.
+export const endTrip = async (id: string, opts: { odometerEnd?: number } = {}) => {
   const { error } = await supabase
     .from('trips')
-    .update({ arrival_time: new Date().toISOString(), status: 'completed', trip_status: 'completed' })
+    .update(compactRow({
+      arrival_time: effectiveNow().toISOString(),
+      status: 'completed',
+      trip_status: 'completed',
+      odometer_end: validOdometer(opts.odometerEnd),
+    }))
     .eq('id', id);
   if (error) throw error;
   await invalidateTripCache();

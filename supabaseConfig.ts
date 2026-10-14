@@ -73,19 +73,34 @@ export const signInWithEmailAndPassword = async (email: string, password: string
 };
 
 export const createUserWithEmailAndPassword = async (email: string, password: string) => {
-  const { data, error } = await supabase.auth.signUp({
-    email,
-    password,
-    options: { data: { role: 'driver' } },
-  });
+  // Every self-registered account is a driver; the role is assigned server-side
+  // and can only be changed by an admin.
+  const { data, error } = await supabase.auth.signUp({ email, password });
   if (error) throw error;
   return data;
 };
 
+// Local data that belongs to the signed-in user: the API response cache (which
+// for staff holds every trip and driver), the unsynced offline write queue, and
+// the cached role. None of it may survive into the next session on this device.
+const USER_SCOPED_KEY_PREFIXES = ['ct_cache:', 'ct_offline_queue', 'ct_role_'];
+
+const clearUserScopedStorage = async () => {
+  try {
+    const keys = await AsyncStorage.getAllKeys();
+    const owned = keys.filter(k => USER_SCOPED_KEY_PREFIXES.some(prefix => k.startsWith(prefix)));
+    if (owned.length) await AsyncStorage.multiRemove(owned);
+  } catch {}
+};
+
 export const signOut = async () => {
-  const { error } = await supabase.auth.signOut();
-  if (error) throw error;
-  cachedUser = null;
+  try {
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
+  } finally {
+    cachedUser = null;
+    await clearUserScopedStorage();
+  }
 };
 
 export const reauthenticateWithPassword = async (email: string, password: string) => {
@@ -93,26 +108,41 @@ export const reauthenticateWithPassword = async (email: string, password: string
   if (error) throw error;
 };
 
-// Sends a 6-digit OTP via Mailgun through the password-otp-send edge function.
-export const sendOtp = async (email: string) => {
-  const { data, error } = await supabase.functions.invoke('password-otp-send', {
-    body: { email },
-  });
-  if (error) throw error;
+// Invokes an Edge Function and surfaces its JSON `error` message. supabase-js
+// only reports "non-2xx status code" for failures; the real reason is in the
+// response body on error.context.
+export const invokeFunction = async <T = any>(name: string, body: Record<string, unknown>): Promise<T> => {
+  const { data, error } = await supabase.functions.invoke(name, { body });
+  if (error) {
+    const context = (error as any)?.context;
+    if (context && typeof context.json === 'function') {
+      let message: string | undefined;
+      try {
+        message = (await context.json())?.error;
+      } catch {}
+      if (message) throw new Error(message);
+    }
+    throw error;
+  }
   if (data?.error) throw new Error(data.error);
+  return data as T;
+};
+
+// Emails a 6-digit reset code via the password-otp-send edge function. It
+// responds the same way whether or not the address has an account.
+export const sendOtp = async (email: string) => {
+  await invokeFunction('password-otp-send', { email });
 };
 
 // Verifies the OTP and resets the password atomically via the password-otp-verify edge function.
 // No active session is required — the edge function uses the service role to update the password.
 export const resetPasswordWithOtp = async (email: string, otp: string, newPassword: string) => {
-  const { data, error } = await supabase.functions.invoke('password-otp-verify', {
-    body: { email, otp, newPassword },
-  });
-  if (error) throw error;
-  if (data?.error) throw new Error(data.error);
+  await invokeFunction('password-otp-verify', { email, otp, newPassword });
 };
 
 // Used by ProfileScreen change-password (requires an active session).
+export const MIN_PASSWORD_LENGTH = 8;
+
 export const updatePassword = async (newPassword: string) => {
   const { error } = await supabase.auth.updateUser({ password: newPassword });
   if (error) throw error;

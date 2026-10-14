@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity,
-  Alert, Switch, ActivityIndicator, RefreshControl, TextInput,
+  Alert, Switch, ActivityIndicator, RefreshControl, TextInput, Modal, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
@@ -33,6 +33,10 @@ export default function DriverHomeScreen({ onTabPress, onNavigateToTrip }: Props
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [dismissingNotifs, setDismissingNotifs] = useState(false);
   const [searchQ, setSearchQ] = useState('');
+  // Start/End confirmation sheet with optional odometer capture (LLD: distance is
+  // computed server-side from odometer_end - odometer_start).
+  const [odoPrompt, setOdoPrompt] = useState<{ trip: Trip; mode: 'start' | 'end' } | null>(null);
+  const [odoValue, setOdoValue] = useState('');
 
   const loadNotifications = async () => {
     if (!user?.uid) return;
@@ -58,8 +62,8 @@ export default function DriverHomeScreen({ onTabPress, onNavigateToTrip }: Props
   };
 
   useEffect(() => {
-    registerOfflineHandler('startTrip', async (payload) => { await startTrip(payload.tripId); });
-    registerOfflineHandler('endTrip', async (payload) => { await endTrip(payload.tripId); });
+    registerOfflineHandler('startTrip', async (payload) => { await startTrip(payload.tripId, { odometerStart: payload.odometerStart }); });
+    registerOfflineHandler('endTrip', async (payload) => { await endTrip(payload.tripId, { odometerEnd: payload.odometerEnd }); });
   }, []);
 
   useEffect(() => {
@@ -121,74 +125,65 @@ export default function DriverHomeScreen({ onTabPress, onNavigateToTrip }: Props
     setIsTracking(false);
   };
 
-  const handleStartTrip = async (trip: Trip) => {
-    Alert.alert(
-      'Start Trip',
-      `Start trip from ${trip.fromPlant} → ${trip.toPlant}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Start',
-          onPress: async () => {
-            setActionLoading(trip.id);
-            try {
-              const net = await NetInfo.fetch();
-              const online = net.isConnected && net.isInternetReachable !== false;
-              if (!online) {
-                await enqueueOfflineOp('startTrip', { tripId: trip.id });
-                setTrips(prev => prev.map(t => (t.id === trip.id ? { ...t, status: 'active' } : t)));
-                Alert.alert('Offline', 'No connection — this will sync automatically once you\'re back online.');
-              } else {
-                await startTrip(trip.id);
-                await load();
-              }
-              // Auto-start GPS when trip begins (works offline too — location is queued server-side)
-              const updated = { ...trip, departureTime: new Date() };
-              await startGPS(updated);
-            } catch {
-              Alert.alert('Error', 'Could not start trip. Try again.');
-            } finally {
-              setActionLoading(null);
-            }
-          },
-        },
-      ]
-    );
+  const handleStartTrip = (trip: Trip) => {
+    setOdoValue('');
+    setOdoPrompt({ trip, mode: 'start' });
   };
 
-  const handleEndTrip = async (trip: Trip) => {
-    Alert.alert(
-      'End Trip',
-      `Mark trip from ${trip.fromPlant} → ${trip.toPlant} as completed?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'End Trip',
-          style: 'destructive',
-          onPress: async () => {
-            setActionLoading(trip.id);
-            try {
-              const net = await NetInfo.fetch();
-              const online = net.isConnected && net.isInternetReachable !== false;
-              if (!online) {
-                await enqueueOfflineOp('endTrip', { tripId: trip.id });
-                setTrips(prev => prev.map(t => (t.id === trip.id ? { ...t, arrivalTime: new Date() } : t)));
-                stopGPS();
-                Alert.alert('Offline', 'No connection — this will sync automatically once you\'re back online.');
-              } else {
-                await endTrip(trip.id);
-                stopGPS();
-                await load();
-              }
-            } catch {
-              Alert.alert('Error', 'Could not end trip. Try again.');
-            } finally {
-              setActionLoading(null);
-            }
-          },
-        },
-      ]
-    );
+  const handleEndTrip = (trip: Trip) => {
+    setOdoValue('');
+    setOdoPrompt({ trip, mode: 'end' });
+  };
+
+  const parseOdometer = (): number | undefined | null => {
+    const raw = odoValue.trim();
+    if (!raw) return undefined;
+    const value = Number(raw);
+    return Number.isFinite(value) && value >= 0 ? value : null;
+  };
+
+  const confirmOdoPrompt = async () => {
+    if (!odoPrompt) return;
+    const { trip, mode } = odoPrompt;
+    const odometer = parseOdometer();
+    if (odometer === null) { Alert.alert('Invalid reading', 'Enter the odometer reading in km, e.g. 125430.'); return; }
+    if (mode === 'end' && odometer !== undefined && trip.odometerStart != null && odometer < trip.odometerStart) {
+      Alert.alert('Check the reading', `The end reading can't be lower than the start reading (${trip.odometerStart} km).`);
+      return;
+    }
+    setOdoPrompt(null);
+    setActionLoading(trip.id);
+    try {
+      const net = await NetInfo.fetch();
+      const online = net.isConnected && net.isInternetReachable !== false;
+      if (mode === 'start') {
+        if (!online) {
+          await enqueueOfflineOp('startTrip', { tripId: trip.id, odometerStart: odometer });
+          setTrips(prev => prev.map(t => (t.id === trip.id ? { ...t, status: 'active', odometerStart: odometer } : t)));
+          Alert.alert('Offline', 'No connection — this will sync automatically once you\'re back online.');
+        } else {
+          await startTrip(trip.id, { odometerStart: odometer });
+          await load();
+        }
+        // Auto-start GPS when trip begins (works offline too — location is queued server-side)
+        await startGPS({ ...trip, departureTime: new Date() });
+      } else {
+        if (!online) {
+          await enqueueOfflineOp('endTrip', { tripId: trip.id, odometerEnd: odometer });
+          setTrips(prev => prev.map(t => (t.id === trip.id ? { ...t, arrivalTime: new Date(), odometerEnd: odometer } : t)));
+          stopGPS();
+          Alert.alert('Offline', 'No connection — this will sync automatically once you\'re back online.');
+        } else {
+          await endTrip(trip.id, { odometerEnd: odometer });
+          stopGPS();
+          await load();
+        }
+      }
+    } catch {
+      Alert.alert('Error', `Could not ${mode} trip. Try again.`);
+    } finally {
+      setActionLoading(null);
+    }
   };
 
   const HOME_LIMIT = 7;
@@ -388,6 +383,41 @@ export default function DriverHomeScreen({ onTabPress, onNavigateToTrip }: Props
           })
         )}
       </ScrollView>
+
+      <Modal visible={!!odoPrompt} transparent animationType="fade" onRequestClose={() => setOdoPrompt(null)}>
+        <KeyboardAvoidingView style={s.odoOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <View style={s.odoCard}>
+            <Text style={s.odoTitle}>{odoPrompt?.mode === 'start' ? 'Start Trip' : 'End Trip'}</Text>
+            <Text style={s.odoSub}>
+              {odoPrompt?.trip.fromPlant || '—'} → {odoPrompt?.trip.toPlant || '—'}
+            </Text>
+            <Text style={s.odoLabel}>
+              Odometer reading (km){odoPrompt?.mode === 'end' && odoPrompt.trip.odometerStart != null ? ` · started at ${odoPrompt.trip.odometerStart}` : ''}
+            </Text>
+            <TextInput
+              style={s.odoInput}
+              value={odoValue}
+              onChangeText={setOdoValue}
+              keyboardType="decimal-pad"
+              placeholder="Optional, e.g. 125430"
+              placeholderTextColor={Colors.textMuted}
+              autoFocus
+            />
+            <View style={s.odoBtns}>
+              <TouchableOpacity style={s.odoCancel} onPress={() => setOdoPrompt(null)} activeOpacity={0.8}>
+                <Text style={s.odoCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.odoConfirm, odoPrompt?.mode === 'end' && { backgroundColor: Colors.danger }]}
+                onPress={confirmOdoPrompt}
+                activeOpacity={0.85}
+              >
+                <Text style={s.odoConfirmText}>{odoPrompt?.mode === 'start' ? 'Start' : 'End Trip'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -401,6 +431,21 @@ const MetaItem = ({ icon, label }: { icon: string; label: string }) => (
 
 const s = {
   safe: { flex: 1, backgroundColor: Colors.background } as const,
+
+  odoOverlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.45)', justifyContent: 'center' as const, padding: Spacing[5] },
+  odoCard: { backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing[5], ...Shadow.lg },
+  odoTitle: { fontSize: FontSize.xl, fontWeight: '800' as const, color: Colors.text },
+  odoSub: { fontSize: FontSize.sm, color: Colors.textSecondary, marginTop: 2, marginBottom: Spacing[4] },
+  odoLabel: { fontSize: FontSize.xs, fontWeight: '600' as const, color: Colors.textSecondary, marginBottom: Spacing[1] },
+  odoInput: {
+    borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.md, paddingHorizontal: Spacing[3],
+    paddingVertical: Spacing[3], fontSize: FontSize.md, color: Colors.text, backgroundColor: Colors.surfaceAlt,
+  },
+  odoBtns: { flexDirection: 'row' as const, gap: Spacing[3], marginTop: Spacing[5] },
+  odoCancel: { flex: 1, paddingVertical: Spacing[3], borderRadius: Radius.md, alignItems: 'center' as const, backgroundColor: Colors.surfaceAlt },
+  odoCancelText: { fontWeight: '600' as const, color: Colors.textSecondary },
+  odoConfirm: { flex: 1, paddingVertical: Spacing[3], borderRadius: Radius.md, alignItems: 'center' as const, backgroundColor: Colors.primary },
+  odoConfirmText: { fontWeight: '700' as const, color: '#fff' },
   scroll: { padding: Spacing[5], paddingBottom: Spacing[12] } as const,
 
   notifSection: { marginBottom: Spacing[4] } as const,

@@ -197,6 +197,7 @@ export default function DashboardScreen({ role, onTabPress }: Props) {
                 { label: 'Add Trip', icon: '➕', onPress: () => onTabPress('trips' as TabId) },
                 { label: 'All Trips', icon: '🚛', onPress: () => onTabPress('trips' as TabId) },
                 { label: 'Drivers', icon: '👷', onPress: () => navigation.navigate('DriverManagement') },
+                { label: 'Fleet Health', icon: '🩺', onPress: () => navigation.navigate('FleetHealth') },
                 { label: 'Reports', icon: '📊', onPress: () => onTabPress('analytics' as TabId) },
                 { label: 'Manage', icon: '⚙️', onPress: () => onTabPress('manage' as TabId) },
               ].map(item => (
@@ -278,8 +279,8 @@ export default function DashboardScreen({ role, onTabPress }: Props) {
 
         {/* Compliance Alerts (Manager/Admin) */}
         {role !== 'driver' && expiringDocs.length > 0 && (
-          <View style={s.alertsCard}>
-            <Text style={s.alertsTitle}>⚠ Documents Expiring Soon</Text>
+          <TouchableOpacity style={s.alertsCard} onPress={() => navigation.navigate('FleetHealth')} activeOpacity={0.85}>
+            <Text style={s.alertsTitle}>⚠ Documents Expiring Soon  ›</Text>
             {expiringDocs.slice(0, 6).map((doc, i) => (
               <View key={i} style={[s.alertRow, i === Math.min(expiringDocs.length, 6) - 1 && { borderBottomWidth: 0 }]}>
                 <Text style={s.alertLabel}>{doc.label}</Text>
@@ -288,7 +289,7 @@ export default function DashboardScreen({ role, onTabPress }: Props) {
                 </Text>
               </View>
             ))}
-          </View>
+          </TouchableOpacity>
         )}
 
         {/* Recent Trips */}

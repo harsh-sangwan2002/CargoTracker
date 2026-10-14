@@ -65,6 +65,13 @@ async function sendResendEmail(to: string, otp: string): Promise<void> {
   }
 }
 
+// Same response whether or not the email has an account, so this endpoint can't
+// be used to discover which emails are registered.
+const GENERIC_OK = { success: true };
+const MAX_CODES_PER_WINDOW = 3;
+const RATE_WINDOW_MS = 15 * 60 * 1000;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS_HEADERS });
   if (req.method !== 'POST') {
@@ -79,22 +86,31 @@ Deno.serve(async (req) => {
   }
 
   const email = body.email?.trim().toLowerCase();
-  if (!email) {
-    return new Response(JSON.stringify({ error: 'email is required' }), { status: 400, headers: CORS_HEADERS });
+  if (!email || !EMAIL_RE.test(email) || email.length > 254) {
+    return new Response(JSON.stringify({ error: 'A valid email is required' }), { status: 400, headers: CORS_HEADERS });
   }
 
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
-  // Check auth.users directly — more reliable than profiles table
-  const { data: usersPage } = await admin.auth.admin.listUsers({ perPage: 1000 });
-  const authUser = usersPage?.users.find(u => u.email?.toLowerCase() === email);
+  // Rate limit per email (counted for unknown emails too, so 429s don't leak existence).
+  const { count: recent } = await admin
+    .from('password_reset_otps')
+    .select('id', { count: 'exact', head: true })
+    .eq('email', email)
+    .gte('created_at', new Date(Date.now() - RATE_WINDOW_MS).toISOString());
 
-  if (!authUser) {
+  if ((recent ?? 0) >= MAX_CODES_PER_WINDOW) {
     return new Response(
-      JSON.stringify({ error: 'No account found with this email address.' }),
-      { status: 404, headers: CORS_HEADERS }
+      JSON.stringify({ error: 'Too many reset requests. Please wait 15 minutes and try again.' }),
+      { status: 429, headers: CORS_HEADERS }
     );
   }
+
+  const { data: profile } = await admin
+    .from('profiles')
+    .select('id, is_active')
+    .eq('email', email)
+    .maybeSingle();
 
   const otp = generateOtp();
   const otpHash = await hashOtp(otp);
@@ -107,25 +123,25 @@ Deno.serve(async (req) => {
     .eq('email', email)
     .eq('used', false);
 
+  // A row is stored even for unknown emails (its code is never sent) so the rate
+  // limit above behaves identically for every address.
   const { error: insertError } = await admin
     .from('password_reset_otps')
-    .insert({ email, otp_hash: otpHash, expires_at: expiresAt });
+    .insert({ email, otp_hash: otpHash, expires_at: expiresAt, used: !profile?.is_active });
 
   if (insertError) {
-    return new Response(
-      JSON.stringify({ error: 'Failed to store OTP. Try again.' }),
-      { status: 500, headers: CORS_HEADERS }
-    );
+    console.error(JSON.stringify({ fn: 'password-otp-send', stage: 'store', error: insertError.message }));
+    return new Response(JSON.stringify({ error: 'Could not start password reset. Try again.' }), { status: 500, headers: CORS_HEADERS });
   }
 
-  try {
-    await sendResendEmail(email, otp);
-  } catch (e) {
-    return new Response(
-      JSON.stringify({ error: `Failed to send email: ${(e as Error).message}` }),
-      { status: 500, headers: CORS_HEADERS }
-    );
+  if (profile?.is_active) {
+    try {
+      await sendResendEmail(email, otp);
+    } catch (e) {
+      console.error(JSON.stringify({ fn: 'password-otp-send', stage: 'email', error: (e as Error).message }));
+      return new Response(JSON.stringify({ error: 'Failed to send the reset email. Try again.' }), { status: 500, headers: CORS_HEADERS });
+    }
   }
 
-  return new Response(JSON.stringify({ success: true }), { status: 200, headers: CORS_HEADERS });
+  return new Response(JSON.stringify(GENERIC_OK), { status: 200, headers: CORS_HEADERS });
 });

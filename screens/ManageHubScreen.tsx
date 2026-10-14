@@ -28,6 +28,14 @@ const ITEMS: ManageItem[] = [
     roles: ['manager', 'admin'],
   },
   {
+    title: 'Fleet Health',
+    subtitle: 'Expiring papers, licences, documents and service due',
+    icon: '🩺',
+    screen: 'FleetHealth',
+    color: Colors.danger,
+    roles: ['manager', 'admin'],
+  },
+  {
     title: 'Drivers',
     subtitle: 'Add, view, edit and remove drivers',
     icon: '🚗',

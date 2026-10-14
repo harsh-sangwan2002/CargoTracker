@@ -12,10 +12,23 @@ interface RequestBody {
   fullName?: string;
 }
 
-function randomPassword(): string {
-  const value = crypto.getRandomValues(new Uint32Array(1))[0] % 9000;
-  return String(value + 1000);
+// 14 characters from an unambiguous alphabet (~80 bits). The previous 4-digit
+// PIN could be brute-forced against the login endpoint in minutes.
+const PASSWORD_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+function randomPassword(length = 14): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(length * 2));
+  let out = '';
+  for (const b of bytes) {
+    // rejection sampling keeps the distribution uniform
+    if (b >= 256 - (256 % PASSWORD_ALPHABET.length)) continue;
+    out += PASSWORD_ALPHABET[b % PASSWORD_ALPHABET.length];
+    if (out.length === length) break;
+  }
+  return out.length === length ? out : randomPassword(length);
 }
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 Deno.serve(async (req) => {
   if (req.method !== 'POST') {
@@ -27,24 +40,22 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: 'Missing Authorization header' }), { status: 401 });
   }
 
-  const callerClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
-    global: { headers: { Authorization: authHeader } },
-  });
+  const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
-  const { data: callerData, error: callerError } = await callerClient.auth.getUser();
+  // Verify the caller's JWT explicitly; never trust anything else in the request.
+  const jwt = authHeader.replace(/^Bearer\s+/i, '');
+  const { data: callerData, error: callerError } = await admin.auth.getUser(jwt);
   if (callerError || !callerData?.user) {
     return new Response(JSON.stringify({ error: 'Invalid session' }), { status: 401 });
   }
 
-  const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
-
   const { data: callerProfile, error: profileError } = await admin
     .from('profiles')
-    .select('role')
+    .select('role, is_active')
     .eq('id', callerData.user.id)
     .maybeSingle();
 
-  if (profileError || callerProfile?.role !== 'admin') {
+  if (profileError || callerProfile?.role !== 'admin' || !callerProfile?.is_active) {
     return new Response(JSON.stringify({ error: 'Only admins can provision driver accounts' }), { status: 403 });
   }
 
@@ -58,6 +69,9 @@ Deno.serve(async (req) => {
   const email = body.email?.trim().toLowerCase();
   if (!email || !body.driverId) {
     return new Response(JSON.stringify({ error: 'driverId and email are required' }), { status: 400 });
+  }
+  if (!EMAIL_RE.test(email) || !UUID_RE.test(body.driverId)) {
+    return new Response(JSON.stringify({ error: 'Invalid email or driverId' }), { status: 400 });
   }
 
   const { data: driverRow, error: driverError } = await admin
@@ -95,12 +109,21 @@ Deno.serve(async (req) => {
   // to create a duplicate auth user (which would fail with "already registered").
   const { data: existingProfile, error: existingProfileError } = await admin
     .from('profiles')
-    .select('id')
+    .select('id, role')
     .eq('email', email)
     .maybeSingle();
 
   if (existingProfileError) {
-    return new Response(JSON.stringify({ error: existingProfileError.message }), { status: 500 });
+    return new Response(JSON.stringify({ error: 'Failed to look up existing accounts' }), { status: 500 });
+  }
+
+  // Linking a staff account as a driver would expose it in driver flows and let
+  // whoever holds the driver record act on a manager/admin identity.
+  if (existingProfile && existingProfile.role !== 'driver') {
+    return new Response(
+      JSON.stringify({ error: 'This email belongs to a staff account and cannot be linked to a driver' }),
+      { status: 409 }
+    );
   }
 
   if (existingProfile) {
@@ -127,9 +150,8 @@ Deno.serve(async (req) => {
     // Race condition: the auth user was created after our profiles lookup above
     // (e.g. self-registration happening concurrently). Fall back to linking it.
     if (createError?.message?.toLowerCase().includes('already been registered')) {
-      const { data: users, error: listError } = await admin.auth.admin.listUsers();
-      const match = !listError && users?.users.find(u => u.email?.toLowerCase() === email);
-      if (match) {
+      const { data: match } = await admin.from('profiles').select('id, role').eq('email', email).maybeSingle();
+      if (match && match.role === 'driver') {
         try {
           await linkExistingProfile(match.id);
         } catch (e) {

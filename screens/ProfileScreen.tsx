@@ -14,9 +14,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-import { auth, reauthenticateWithPassword, signOut, updatePassword } from '../supabaseConfig';
-import { deleteUserAccountData, getStaffProfile, upsertStaffProfile, seedManagerAccounts, StaffProfile } from '../services/userService';
-import { getDriverByUserId, getDriverByEmail, addDriver, updateDriver, Driver } from '../services/driverService';
+import { auth, reauthenticateWithPassword, signOut, updatePassword, MIN_PASSWORD_LENGTH } from '../supabaseConfig';
+import { deleteUserAccountData, getStaffProfile, upsertStaffProfile, StaffProfile } from '../services/userService';
+import { getMyDriverProfile, saveMyDriverProfile, maskId, Driver } from '../services/driverService';
+import { getPendingOfflineCount } from '../utils/offlineQueue';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
 import type { UserRole } from './MainTabsScreen';
 
@@ -66,9 +67,6 @@ export default function ProfileScreen({ role, profileComplete = true, onProfileS
   const [confirmPass, setConfirmPass] = useState('');
   const [changingPw, setChangingPw] = useState(false);
 
-  // Seed managers state
-  const [seeding, setSeeding] = useState(false);
-
   const roleLabel = role === 'admin' ? 'Admin' : role === 'manager' ? 'Manager' : 'Driver';
   const roleColor = role === 'admin' ? Colors.roleAdmin : role === 'manager' ? Colors.roleManager : Colors.roleDriver;
   const roleLight = role === 'admin' ? Colors.roleAdminLight : role === 'manager' ? Colors.roleManagerLight : Colors.roleDriverLight;
@@ -87,11 +85,9 @@ export default function ProfileScreen({ role, profileComplete = true, onProfileS
   useEffect(() => {
     if (role !== 'driver' || !user?.uid) return;
     setLoadingProfile(true);
-    const email = (user.email ?? '').trim().toLowerCase();
 
-    getDriverByUserId(user.uid)
-      .then(async byUid => {
-        const profile = byUid ?? (email ? await getDriverByEmail(email) : null);
+    getMyDriverProfile()
+      .then(profile => {
         if (profile) {
           setDriverProfile(profile);
           setDriverForm({
@@ -128,41 +124,17 @@ export default function ProfileScreen({ role, profileComplete = true, onProfileS
     if (!user?.uid) return;
     setSavingProfile(true);
     try {
-      const uid = user.uid;
-      const email = (user.email ?? '').trim().toLowerCase();
       const payload = {
         fullName: driverForm.fullName.trim(),
         age: parseInt(driverForm.age),
         address: driverForm.address.trim(),
         aadhaarCard: driverForm.aadhaarCard.trim(),
         panCard: driverForm.panCard.trim().toUpperCase(),
-        email,
       };
-
-      if (driverProfile) {
-        await updateDriver(driverProfile.id, payload);
-        setDriverProfile(prev => prev ? { ...prev, ...payload } : null);
-      } else {
-        const byEmail = email ? await getDriverByEmail(email) : null;
-        if (byEmail) {
-          await updateDriver(byEmail.id, { ...payload, userId: uid });
-          setDriverProfile({ ...byEmail, ...payload, userId: uid });
-        } else {
-          const newId = await addDriver({
-            ...payload,
-            vehicleOwned: '',
-            photoUrl: '',
-            userId: uid,
-          });
-          setDriverProfile({
-            id: newId as string,
-            ...payload,
-            vehicleOwned: '',
-            photoUrl: '',
-            userId: uid,
-          });
-        }
-      }
+      // Server-side: updates this driver's record, links an admin-created one
+      // with the same confirmed email, or creates it.
+      await saveMyDriverProfile(payload);
+      setDriverProfile(await getMyDriverProfile());
       setEditingProfile(false);
       onProfileSaved?.();
       Alert.alert('Saved', 'Your profile has been updated.');
@@ -191,7 +163,7 @@ export default function ProfileScreen({ role, profileComplete = true, onProfileS
 
   const handleChangePassword = async () => {
     if (!currentPass.trim()) { Alert.alert('Required', 'Enter your current password.'); return; }
-    if (newPass.length < 6) { Alert.alert('Weak Password', 'New password must be at least 6 characters.'); return; }
+    if (newPass.length < MIN_PASSWORD_LENGTH) { Alert.alert('Weak Password', `New password must be at least ${MIN_PASSWORD_LENGTH} characters.`); return; }
     if (newPass !== confirmPass) { Alert.alert('Mismatch', 'New passwords do not match.'); return; }
     if (!user?.email) return;
     setChangingPw(true);
@@ -209,32 +181,14 @@ export default function ProfileScreen({ role, profileComplete = true, onProfileS
     }
   };
 
-  const handleSeedManagers = async () => {
-    Alert.alert(
-      'Seed Manager Accounts',
-      'This will create:\n• manager1@cargotracker.com\n• manager2@cargotracker.com\n\nPassword: Manager@123\n\nNote: Requires email confirmation to be OFF in Supabase Auth settings.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Create', onPress: async () => {
-            setSeeding(true);
-            try {
-              const results = await seedManagerAccounts();
-              const summary = results.map(r => `${r.email}: ${r.status}`).join('\n');
-              Alert.alert('Seeding Complete', summary);
-            } catch {
-              Alert.alert('Error', 'Failed to seed accounts.');
-            } finally {
-              setSeeding(false);
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  const handleLogout = () => {
-    Alert.alert('Sign out', 'Are you sure you want to sign out?', [
+  const handleLogout = async () => {
+    // Sign-out clears the offline queue (so it can't replay under another user),
+    // so warn if this device still holds trip updates that haven't synced.
+    const pending = await getPendingOfflineCount().catch(() => 0);
+    const message = pending > 0
+      ? `${pending} trip update${pending > 1 ? 's have' : ' has'} not synced yet and will be lost if you sign out now. Reconnect to sync first.`
+      : 'Are you sure you want to sign out?';
+    Alert.alert('Sign out', message, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Sign Out', style: 'destructive', onPress: () => signOut() },
     ]);
@@ -247,10 +201,17 @@ export default function ProfileScreen({ role, profileComplete = true, onProfileS
     try {
       await reauthenticateWithPassword(user.email, deletePass);
       await deleteUserAccountData(user.uid);
-      await signOut();
       setDeleteModal(false);
+      // The auth user is gone server-side; this clears the local session and data.
+      await signOut().catch(() => {});
     } catch (err: any) {
-      Alert.alert('Error', err.message?.toLowerCase?.().includes('invalid') ? 'Incorrect password.' : 'Failed to delete account.');
+      const msg: string = err.message ?? '';
+      Alert.alert(
+        'Error',
+        msg.toLowerCase().includes('invalid') ? 'Incorrect password.'
+          : msg.includes('last active admin') ? 'You are the only admin. Promote another admin before deleting your account.'
+          : 'Failed to delete account.'
+      );
     } finally {
       setDeleting(false);
     }
@@ -357,8 +318,8 @@ export default function ProfileScreen({ role, profileComplete = true, onProfileS
                 {[
                   { label: 'Full Name', value: driverProfile?.fullName },
                   { label: 'Age', value: driverProfile?.age?.toString() },
-                  { label: 'Aadhaar', value: driverProfile?.aadhaarCard },
-                  { label: 'PAN Card', value: driverProfile?.panCard },
+                  { label: 'Aadhaar', value: maskId(driverProfile?.aadhaarCard) },
+                  { label: 'PAN Card', value: maskId(driverProfile?.panCard) },
                   { label: 'Email', value: user?.email ?? '' },
                 ].map((row, i, arr) => (
                   <View key={row.label} style={[s.infoRow, i === arr.length - 1 && { borderBottomWidth: 0 }]}>
@@ -483,13 +444,6 @@ export default function ProfileScreen({ role, profileComplete = true, onProfileS
             <Text style={s.actionLabel}>Change Password</Text>
             <Text style={s.actionArrow}>›</Text>
           </TouchableOpacity>
-          {role === 'admin' && (
-            <TouchableOpacity style={s.actionBtn} onPress={handleSeedManagers} activeOpacity={0.8} disabled={seeding}>
-              <Text style={s.actionIcon}>👥</Text>
-              <Text style={s.actionLabel}>{seeding ? 'Creating Managers...' : 'Seed Test Managers'}</Text>
-              {seeding ? <ActivityIndicator size="small" color={Colors.primary} /> : <Text style={s.actionArrow}>›</Text>}
-            </TouchableOpacity>
-          )}
           <TouchableOpacity style={s.actionBtn} onPress={handleLogout} activeOpacity={0.8}>
             <Text style={s.actionIcon}>🚪</Text>
             <Text style={s.actionLabel}>Sign Out</Text>

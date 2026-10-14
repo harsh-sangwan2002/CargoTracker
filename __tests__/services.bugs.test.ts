@@ -26,8 +26,13 @@ jest.mock('../supabaseConfig', () => {
   return {
     supabase: {
       from: (table: string) => makeBuilder(table),
+      rpc: (fn: string, args?: any) => {
+        mockCalls.push({ table: `rpc:${fn}`, ops: [['rpc', [args]]] });
+        return Promise.resolve(mockResults[`rpc:${fn}`] ?? { data: null, error: null });
+      },
       functions: { invoke: jest.fn(() => Promise.resolve({ data: null, error: null })) },
     },
+    invokeFunction: jest.fn(() => Promise.resolve({})),
     auth: { currentUser: null },
   };
 });
@@ -76,15 +81,21 @@ describe('analytics: distance & fuel per truck', () => {
 });
 
 describe('userService.deleteUserAccountData', () => {
+  // user_id is the *creator* of a trip; deleting a manager must not wipe every
+  // trip they dispatched. Deletion now runs server-side (delete_my_account),
+  // which keeps trip history and only unlinks it from the deleted account.
   it('does not delete trips merely created by the user being deleted (e.g. a manager)', async () => {
     const { deleteUserAccountData } = require('../services/userService');
     await deleteUserAccountData('manager-uid');
     const tripDelete = mockCalls.find(c => c.table === 'trips' && c.ops.some(([n]) => n === 'delete'));
-    expect(tripDelete).toBeDefined();
-    const orFilter: string = opArgs(tripDelete!, 'or')?.[0] ?? '';
-    // user_id is the *creator* of the trip; deleting a manager wipes every trip they dispatched.
-    expect(orFilter).not.toContain('user_id.eq.manager-uid,');
-    expect(orFilter.startsWith('user_id.eq.')).toBe(false);
+    expect(tripDelete).toBeUndefined();
+    expect(mockCalls.some(c => c.table === 'rpc:delete_my_account')).toBe(true);
+  });
+
+  it('surfaces a server refusal (e.g. last admin) instead of signing out', async () => {
+    mockResults['rpc:delete_my_account'] = { data: null, error: { message: 'the last active admin cannot delete their account', code: '42501' } };
+    const { deleteUserAccountData } = require('../services/userService');
+    await expect(deleteUserAccountData('admin-uid')).rejects.toMatchObject({ code: '42501' });
   });
 });
 

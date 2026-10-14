@@ -21,7 +21,8 @@
       "distribution": "store",
       "env": {
         "EXPO_PUBLIC_SUPABASE_URL": "https://jlagdydxwxvjyyxxqykm.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_Cofh-Ejm0KSxrMSVqi7dWg_9dfA33gZ"
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_Cofh-Ejm0KSxrMSVqi7dWg_9dfA33gZ",
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
       },
       "ios": { "buildConfiguration": "Release", "autoIncrement": true },
       "android": { "buildType": "app-bundle", "autoIncrement": true }

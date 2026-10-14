@@ -1,5 +1,6 @@
 import { supabase } from '../supabaseConfig';
 import { clearCacheByPrefix, getCache, setCache, TTL } from '../utils/cache';
+import { effectiveNow } from '../utils/offlineQueue';
 
 export interface FuelLog {
   id?: string;
@@ -40,6 +41,8 @@ export const addFuelLog = async (log: Omit<FuelLog, 'id' | 'loggedAt'>) => {
       odometer_reading: log.odometerReading ?? null,
       fuel_station: log.fuelStation || null,
       logged_by: cleanId(log.loggedBy),
+      // when the driver entered it, even if replayed later from the offline queue
+      logged_at: effectiveNow().toISOString(),
     })
     .select('id')
     .single();

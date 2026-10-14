@@ -11,7 +11,9 @@ import {
   Pressable,
   Platform,
   Animated,
-  PanResponder
+  PanResponder,
+  Share,
+  Alert
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import {SafeAreaView} from 'react-native-safe-area-context';
@@ -19,7 +21,13 @@ import {auth} from '../supabaseConfig';
 import {getTrips, getTripsByUser, TripRecord} from '../services/tripService';
 import {getDrivers, Driver} from '../services/driverService';
 import {getVehicles, Vehicle} from '../services/vehicleService';
-import {vehicleStatsFromTrips} from '../services/analyticsService';
+import {
+  vehicleStatsFromTrips,
+  getVehicleStatsForRange,
+  driverPerformanceFromTrips,
+  buildAnalyticsCsv,
+  VehicleStat
+} from '../services/analyticsService';
 import {Colors, FontSize, Radius, Shadow, Spacing} from '../utils/theme';
 import {ShimmerStatsRow, ShimmerList} from '../components/Shimmer';
 import type {UserRole} from './MainTabsScreen';
@@ -135,6 +143,7 @@ function DriverSummaryCard({
   distance,
   completedTrips,
   avgTripHours,
+  kmPerLiter,
 }: {
   name: string;
   trips: number;
@@ -142,6 +151,7 @@ function DriverSummaryCard({
   distance: number;
   completedTrips: number;
   avgTripHours: number | null;
+  kmPerLiter: number | null;
 }) {
   const completionPct = trips > 0 ? Math.round((completedTrips / trips) * 100) : 0;
   return (
@@ -161,6 +171,7 @@ function DriverSummaryCard({
         <View style={ds.metaRow}>
           <Text style={ds.meta}>✅ {completionPct}% completed</Text>
           {avgTripHours !== null && <Text style={ds.meta}>⏱ {avgTripHours.toFixed(1)}h avg</Text>}
+          {kmPerLiter !== null && <Text style={ds.meta}>⚙️ {kmPerLiter.toFixed(1)} km/L</Text>}
         </View>
       </View>
     </View>
@@ -236,11 +247,6 @@ export default function AnalyticsScreen({role}: Props) {
   const driversById = useMemo(() => new Map(drivers.map(d => [d.id, d])), [drivers]);
   const selectedDriver = driverFilter !== 'all' ? driversById.get(driverFilter) : undefined;
 
-  const maskAadhaar = (aadhaar?: string) => {
-    const digits = (aadhaar ?? '').replace(/\D/g, '');
-    return digits.length >= 4 ? `•••• •••• ${digits.slice(-4)}` : '';
-  };
-
   // A trip belongs to a driver if its driverId matches; trips created before the
   // relational migration may lack driverId, so fall back to a name match for those.
   const tripMatchesDriver = (t: TripRecord, driverId: string) => {
@@ -303,49 +309,64 @@ export default function AnalyticsScreen({role}: Props) {
   const totalTrips = filtered.length;
   const activeTrips = filtered.filter((t) => !t.arrivalTime).length;
   const deliveredTrips = filtered.filter((t) => !!t.arrivalTime).length;
-  const totalFuel = filtered.reduce((s, t) => s + (parseFloat(t.fuelFilled) || 0), 0);
-  const totalDist = filtered.reduce((s, t) => s + (parseFloat(t.distanceTravelled ?? '0') || 0), 0);
+  const billable = filtered.filter((t) => t.tripStatus !== 'cancelled');
+  const totalFuel = billable.reduce((s, t) => s + (parseFloat(t.fuelFilled) || 0), 0);
+  const totalDist = billable.reduce((s, t) => s + (parseFloat(t.distanceTravelled ?? '0') || 0), 0);
   const avgFuel = totalTrips > 0 ? (totalFuel / totalTrips).toFixed(1) : '0';
 
-  /* ── Trips per driver ──────────────────────────────────────────── */
-  // Grouped by driverId (not name) so two drivers sharing a name aren't merged into
-  // one row; legacy trips without a driverId still fall back to grouping by name.
+  /* ── Driver performance ───────────────────────────────────────── */
+  const driverPerformance = useMemo(
+    () => driverPerformanceFromTrips(filtered, new Map(drivers.map(d => [d.id, d.fullName]))),
+    [filtered, drivers]
+  );
+
+  // Top 10 by trips; drivers sharing a name are told apart by their vehicle.
   const driverStats = useMemo(() => {
-    const map: Record<string, {label: string; trips: number; fuel: number; distance: number; completedTrips: number; totalTripHours: number}> = {};
-    filtered.forEach((t) => {
-      const key = t.driverId || `name:${t.driverName || 'Unknown'}`;
-      const driver = t.driverId ? driversById.get(t.driverId) : undefined;
-      if (!map[key]) map[key] = { label: driver?.fullName || t.driverName || 'Unknown', trips: 0, fuel: 0, distance: 0, completedTrips: 0, totalTripHours: 0 };
-      map[key].trips++;
-      map[key].fuel += parseFloat(t.fuelFilled) || 0;
-      map[key].distance += parseFloat(t.distanceTravelled ?? '0') || 0;
-      if (t.arrivalTime) {
-        map[key].completedTrips++;
-        const hours = (t.arrivalTime.getTime() - t.departureTime.getTime()) / (1000 * 60 * 60);
-        if (hours > 0) map[key].totalTripHours += hours;
-      }
-    });
-
     const labelCounts: Record<string, number> = {};
-    Object.values(map).forEach(v => { labelCounts[v.label] = (labelCounts[v.label] || 0) + 1; });
+    driverPerformance.forEach(d => { labelCounts[d.name] = (labelCounts[d.name] || 0) + 1; });
+    return [...driverPerformance]
+      .sort((a, b) => b.trips - a.trips)
+      .slice(0, 10)
+      .map(d => {
+        const vehicle = driversById.get(d.key)?.vehicleOwned;
+        const label = labelCounts[d.name] > 1 && vehicle ? `${d.name} (${vehicle})` : d.name;
+        return [label, d] as [string, typeof d];
+      });
+  }, [driverPerformance, driversById]);
 
-    return Object.entries(map)
-      .map(([key, v]) => {
-        let label = v.label;
-        if (labelCounts[v.label] > 1) {
-          const aadhaar = maskAadhaar(driversById.get(key)?.aadhaarCard);
-          if (aadhaar) label = `${v.label} (${aadhaar})`;
-        }
-        return [label, v] as [string, typeof v];
-      })
-      .sort((a, b) => b[1].trips - a[1].trips)
-      .slice(0, 10);
-  }, [filtered, driversById]);
+  const distanceLeaderboard = useMemo(
+    () => [...driverPerformance]
+      .filter(d => d.distanceKm > 0)
+      .sort((a, b) => b.distanceKm - a.distanceKm)
+      .slice(0, 5)
+      .map(d => ({label: d.name, value: Math.round(d.distanceKm), sub: 'km'})),
+    [driverPerformance]
+  );
 
   const driverChartData = driverStats.map(([label, v]) => ({label, value: v.trips}));
 
   /* ── Per-truck distance & fuel breakdown ───────────────────────── */
-  const vehicleStats = useMemo(() => vehicleStatsFromTrips(filtered, vehicles), [filtered, vehicles]);
+  // Staff: aggregated server-side (rollup-backed for long ranges); drivers and
+  // offline/fallback: computed from the trips already on the device.
+  const clientVehicleStats = useMemo(() => vehicleStatsFromTrips(filtered, vehicles), [filtered, vehicles]);
+  const [serverVehicleStats, setServerVehicleStats] = useState<VehicleStat[] | null>(null);
+  useEffect(() => {
+    if (role === 'driver' || loading) return;
+    let cancelled = false;
+    getVehicleStatsForRange(
+      {
+        start: rangeStart ?? new Date(0),
+        end: rangeEnd ?? endOfDay(new Date()),
+        driverId: driverFilter !== 'all' ? driverFilter : undefined
+      },
+      filtered,
+      vehicles
+    ).then(({stats, source}) => {
+      if (!cancelled) setServerVehicleStats(source === 'server' ? stats : null);
+    });
+    return () => { cancelled = true; };
+  }, [role, loading, rangeStart, rangeEnd, driverFilter, allTrips, vehicles]);
+  const vehicleStats = serverVehicleStats ?? clientVehicleStats;
 
   /* ── Fixed 7-day chart using reliable date keys ────────────────── */
   const dayChartData = useMemo(() => {
@@ -405,6 +426,21 @@ export default function AnalyticsScreen({role}: Props) {
 
   const selectedDriverLabel = driverFilter === 'all' ? 'All Drivers' : (selectedDriver?.fullName ?? 'Unknown Driver');
 
+  const handleExport = async () => {
+    const period = dateRange === 'custom'
+      ? `${fmtDate(customFrom)} - ${fmtDate(customTo)}`
+      : rangeLabels[dateRange];
+    const label = driverFilter !== 'all' ? `${period} (${selectedDriverLabel})` : period;
+    try {
+      await Share.share({
+        title: `CargoTracker report - ${label}`,
+        message: buildAnalyticsCsv(label, vehicleStats, driverPerformance),
+      });
+    } catch {
+      Alert.alert('Export failed', 'Could not open the share sheet.');
+    }
+  };
+
   return (
     <SafeAreaView style={s.safe}>
       <ScrollView
@@ -421,7 +457,14 @@ export default function AnalyticsScreen({role}: Props) {
             tintColor={Colors.primary}
           />
         }>
-        <Text style={s.pageTitle}>Reports</Text>
+        <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'}}>
+          <Text style={s.pageTitle}>Reports</Text>
+          {!loading && totalTrips > 0 && (
+            <TouchableOpacity onPress={handleExport} activeOpacity={0.8} style={s.exportBtn}>
+              <Text style={s.exportBtnText}>⬇︎ Export CSV</Text>
+            </TouchableOpacity>
+          )}
+        </View>
 
         {/* ── Date Range Chips ───────────────────────────────────── */}
         <Text style={s.sectionLabel}>Period</Text>
@@ -530,7 +573,6 @@ export default function AnalyticsScreen({role}: Props) {
                 ) : (
                   filteredDriverList.map((d) => {
                     const tripCount = allTrips.filter((t) => tripMatchesDriver(t, d.id)).length;
-                    const aadhaar = maskAadhaar(d.aadhaarCard);
                     return (
                       <TouchableOpacity
                         key={d.id}
@@ -544,7 +586,7 @@ export default function AnalyticsScreen({role}: Props) {
                           {d.fullName}
                         </Text>
                         <Text style={s.driverOptionSub}>
-                          {aadhaar ? `Aadhaar ${aadhaar} · ` : ''}{tripCount} trip{tripCount !== 1 ? 's' : ''}
+                          {d.vehicleOwned ? `${d.vehicleOwned} · ` : ''}{tripCount} trip{tripCount !== 1 ? 's' : ''}
                         </Text>
                       </TouchableOpacity>
                     );
@@ -590,15 +632,27 @@ export default function AnalyticsScreen({role}: Props) {
                 {/* Detailed per-driver rows */}
                 {driverStats.map(([name, v]) => (
                   <DriverSummaryCard
-                    key={name}
+                    key={v.key}
                     name={name}
                     trips={v.trips}
-                    fuel={v.fuel}
-                    distance={v.distance}
-                    completedTrips={v.completedTrips}
-                    avgTripHours={v.completedTrips > 0 ? v.totalTripHours / v.completedTrips : null}
+                    fuel={v.fuelLiters}
+                    distance={v.distanceKm}
+                    completedTrips={v.completed}
+                    avgTripHours={v.avgTripHours}
+                    kmPerLiter={v.kmPerLiter}
                   />
                 ))}
+              </View>
+            )}
+
+            {/* ── Distance leaderboard ───────────────────────────── */}
+            {role !== 'driver' && distanceLeaderboard.length > 1 && (
+              <View style={s.chartCard}>
+                <Text style={s.chartTitle}>Distance Leaderboard</Text>
+                <Text style={s.chartSub}>Top drivers by km · {rangeLabels[dateRange]}</Text>
+                <View style={{marginTop: Spacing[4]}}>
+                  <BarChart data={distanceLeaderboard} color={Colors.info} />
+                </View>
               </View>
             )}
 
@@ -741,6 +795,14 @@ const s = {
   chipText: {fontSize: FontSize.sm, fontWeight: '600' as const, color: Colors.textSecondary},
   chipTextActive: {color: '#fff'},
 
+  exportBtn: {
+    backgroundColor: Colors.primaryLight,
+    paddingHorizontal: Spacing[3],
+    paddingVertical: Spacing[2],
+    borderRadius: Radius.full,
+    marginBottom: Spacing[5]
+  },
+  exportBtnText: {color: Colors.primary, fontWeight: '700' as const, fontSize: FontSize.sm},
   customRangeRow: {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,

@@ -17,7 +17,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { auth } from '../supabaseConfig';
 import { useNavigation } from '@react-navigation/native';
-import { getUserByEmail, getUsers, isAdmin, isManager, updateUserRole } from '../services/userService';
+import { getUserByEmail, getUsers, isAdmin, isManager, setUserActive, updateUserRole } from '../services/userService';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
 import { ShimmerRow } from '../components/Shimmer';
 
@@ -25,6 +25,7 @@ interface UserRecord {
   uid: string;
   email: string;
   role: 'driver' | 'manager' | 'admin';
+  isActive: boolean;
   createdAt?: any;
 }
 
@@ -107,11 +108,43 @@ export default function UserManagementScreen() {
       setUsers(prev => prev.map(u => u.uid === selected.uid ? { ...u, role: pendingRole } : u));
       setRoleModal(false);
       setSelected(null);
-    } catch {
-      Alert.alert('Error', 'Failed to update role.');
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Failed to update role.');
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleToggleActive = () => {
+    if (!selected) return;
+    const target = selected;
+    const deactivate = target.isActive;
+    Alert.alert(
+      deactivate ? 'Deactivate user' : 'Reactivate user',
+      deactivate
+        ? `${target.email} will lose access immediately. Their trips and records are kept.`
+        : `${target.email} will regain access with their current role.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: deactivate ? 'Deactivate' : 'Reactivate',
+          style: deactivate ? 'destructive' : 'default',
+          onPress: async () => {
+            setSaving(true);
+            try {
+              await setUserActive(target.uid, !deactivate);
+              setUsers(prev => prev.map(u => u.uid === target.uid ? { ...u, isActive: !deactivate } : u));
+              setRoleModal(false);
+              setSelected(null);
+            } catch (e: any) {
+              Alert.alert('Error', e?.message || 'Failed to update user.');
+            } finally {
+              setSaving(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleAddUser = async () => {
@@ -131,8 +164,8 @@ export default function UserManagementScreen() {
       setNewEmail('');
       setNewRole('driver');
       Alert.alert('Success', `Role updated for ${email}`);
-    } catch {
-      Alert.alert('Error', 'Failed to update user role.');
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Failed to update user role.');
     } finally {
       setSaving(false);
     }
@@ -220,8 +253,15 @@ export default function UserManagementScreen() {
                 </View>
                 <View style={s.cardInfo}>
                   <Text style={s.cardEmail} numberOfLines={1}>{item.email}</Text>
-                  <View style={[s.roleBadge, { backgroundColor: cfg.bg }]}>
-                    <Text style={[s.roleText, { color: cfg.color }]}>{cfg.label}</Text>
+                  <View style={{ flexDirection: 'row' as const, gap: Spacing[1] }}>
+                    <View style={[s.roleBadge, { backgroundColor: cfg.bg }]}>
+                      <Text style={[s.roleText, { color: cfg.color }]}>{cfg.label}</Text>
+                    </View>
+                    {!item.isActive && (
+                      <View style={[s.roleBadge, { backgroundColor: Colors.surfaceAlt }]}>
+                        <Text style={[s.roleText, { color: Colors.textMuted }]}>Deactivated</Text>
+                      </View>
+                    )}
                   </View>
                 </View>
                 <TouchableOpacity style={s.editRoleBtn} onPress={() => openRoleModal(item)} activeOpacity={0.85}>
@@ -263,6 +303,13 @@ export default function UserManagementScreen() {
                 {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={mo.confirmText}>Update</Text>}
               </TouchableOpacity>
             </View>
+            {isUserAdmin && selected && selected.uid !== currentUser?.uid && (
+              <TouchableOpacity onPress={handleToggleActive} disabled={saving} activeOpacity={0.7} style={{ marginTop: Spacing[4], alignItems: 'center' as const }}>
+                <Text style={{ color: selected.isActive ? Colors.danger : Colors.success, fontWeight: '700' as const, fontSize: FontSize.sm }}>
+                  {selected.isActive ? 'Deactivate account' : 'Reactivate account'}
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
         </Pressable>
       </Modal>

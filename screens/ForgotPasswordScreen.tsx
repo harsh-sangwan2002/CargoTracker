@@ -6,7 +6,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-import { sendOtp, resetPasswordWithOtp, signOut } from '../supabaseConfig';
+import { sendOtp, resetPasswordWithOtp, signOut, MIN_PASSWORD_LENGTH } from '../supabaseConfig';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
 import { isValidOtp } from '../utils/otpUtils';
 
@@ -28,12 +28,7 @@ export default function ForgotPasswordScreen() {
       await sendOtp(email.trim().toLowerCase());
       setStep('otp');
     } catch (err: any) {
-      const msg: string = err.message ?? '';
-      if (msg.toLowerCase().includes('not found') || msg.toLowerCase().includes('no account')) {
-        Alert.alert('Not Found', 'No account found with this email address.');
-      } else {
-        Alert.alert('Error', msg || 'Failed to send OTP. Check your email and try again.');
-      }
+      Alert.alert('Error', err.message || 'Failed to send OTP. Check your email and try again.');
     } finally {
       setLoading(false);
     }
@@ -48,7 +43,7 @@ export default function ForgotPasswordScreen() {
   };
 
   const handleResetPassword = async () => {
-    if (newPassword.length < 6) { Alert.alert('Weak Password', 'Password must be at least 6 characters.'); return; }
+    if (newPassword.length < MIN_PASSWORD_LENGTH) { Alert.alert('Weak Password', `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`); return; }
     if (newPassword !== confirmPassword) { Alert.alert('Mismatch', 'Passwords do not match.'); return; }
     setLoading(true);
     try {
@@ -80,7 +75,7 @@ export default function ForgotPasswordScreen() {
     },
     otp: {
       title: 'Enter Code',
-      sub: `A 6-digit code was sent to ${email}. Check your inbox (and spam folder).`,
+      sub: `If ${email} has an account, a 6-digit code is on its way. Check your inbox (and spam folder).`,
       btnLabel: 'Next',
       onPress: handleOtpNext,
     },
