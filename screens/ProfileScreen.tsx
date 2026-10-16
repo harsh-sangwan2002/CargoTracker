@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -18,8 +19,12 @@ import { auth, reauthenticateWithPassword, signOut, updatePassword, MIN_PASSWORD
 import { deleteUserAccountData, getStaffProfile, upsertStaffProfile, StaffProfile } from '../services/userService';
 import { getMyDriverProfile, saveMyDriverProfile, maskId, Driver } from '../services/driverService';
 import { getPendingOfflineCount } from '../utils/offlineQueue';
+import { stopDriverTracking } from '../utils/driverTracking';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
 import type { UserRole } from './MainTabsScreen';
+
+// Hosted from docs/index.html via GitHub Pages; must match the URL entered in Play Console.
+const PRIVACY_POLICY_URL = 'https://harsh-sangwan2002.github.io/CargoTracker/';
 
 interface Props {
   role: UserRole;
@@ -190,7 +195,14 @@ export default function ProfileScreen({ role, profileComplete = true, onProfileS
       : 'Are you sure you want to sign out?';
     Alert.alert('Sign out', message, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Sign Out', style: 'destructive', onPress: () => signOut() },
+      {
+        text: 'Sign Out',
+        style: 'destructive',
+        onPress: () => {
+          stopDriverTracking();
+          signOut().catch(() => {});
+        },
+      },
     ]);
   };
 
@@ -200,6 +212,7 @@ export default function ProfileScreen({ role, profileComplete = true, onProfileS
     setDeleting(true);
     try {
       await reauthenticateWithPassword(user.email, deletePass);
+      stopDriverTracking();
       await deleteUserAccountData(user.uid);
       setDeleteModal(false);
       // The auth user is gone server-side; this clears the local session and data.
@@ -449,12 +462,17 @@ export default function ProfileScreen({ role, profileComplete = true, onProfileS
             <Text style={s.actionLabel}>Sign Out</Text>
             <Text style={s.actionArrow}>›</Text>
           </TouchableOpacity>
+          <TouchableOpacity style={s.actionBtn} onPress={() => Linking.openURL(PRIVACY_POLICY_URL)} activeOpacity={0.8}>
+            <Text style={s.actionIcon}>🔒</Text>
+            <Text style={s.actionLabel}>Privacy Policy</Text>
+            <Text style={s.actionArrow}>›</Text>
+          </TouchableOpacity>
           <TouchableOpacity
             style={[s.actionBtn, s.dangerBtn]}
             onPress={() => {
               Alert.alert(
-                'Delete App Data',
-                'This will permanently delete your CargoTracker profile data and sign you out. Supabase Auth account deletion requires an admin backend.',
+                'Delete Account',
+                'This permanently deletes your CargoTracker account and personal details and signs you out. Trip records stay with your company. This cannot be undone.',
                 [
                   { text: 'Cancel', style: 'cancel' },
                   { text: 'Continue', style: 'destructive', onPress: () => setDeleteModal(true) },
@@ -464,7 +482,7 @@ export default function ProfileScreen({ role, profileComplete = true, onProfileS
             activeOpacity={0.8}
           >
             <Text style={s.actionIcon}>🗑️</Text>
-            <Text style={[s.actionLabel, { color: Colors.danger }]}>Delete App Data</Text>
+            <Text style={[s.actionLabel, { color: Colors.danger }]}>Delete Account</Text>
             <Text style={[s.actionArrow, { color: Colors.danger }]}>›</Text>
           </TouchableOpacity>
         </View>

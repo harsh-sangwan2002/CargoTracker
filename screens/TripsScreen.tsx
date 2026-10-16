@@ -28,7 +28,7 @@ import { addNotification } from '../services/notificationService';
 import { getPlants, seedDefaultPlantsIfEmpty, Plant } from '../services/plantService';
 import { getVehicles, Vehicle } from '../services/vehicleService';
 import { getFuelLogsByTrip, addFuelLog, FuelLog } from '../services/fuelService';
-import { registerOfflineHandler, enqueueOfflineOp } from '../utils/offlineQueue';
+import { enqueueOfflineOp } from '../utils/offlineQueue';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
 import { ShimmerList } from '../components/Shimmer';
 import type { UserRole } from './MainTabsScreen';
@@ -227,6 +227,14 @@ const tripToForm = (t: TripRecord & { id: string }): FormState => ({
 });
 
 /* ─── Main Screen ────────────────────────────────────────────────── */
+// Keep whatever stage the trip is in (pending / started by the driver / cancelled)
+// unless the edit sets or clears the arrival time.
+const editedTripStatus = (current: string, arrivalTime: Date | null) => {
+  const done = ['delivered', 'completed'].includes((current ?? '').toLowerCase());
+  if (arrivalTime) return done ? current : 'Delivered';
+  return done ? 'active' : (current || 'pending');
+};
+
 export default function TripsScreen({ role, pendingTripId, onPendingTripConsumed, initialSearch }: Props) {
   const user = auth.currentUser;
   const [trips, setTrips] = useState<(TripRecord & { id: string })[]>([]);
@@ -311,8 +319,9 @@ export default function TripsScreen({ role, pendingTripId, onPendingTripConsumed
         getDrivers(),
         getVehicles(),
       ]);
-      await seedDefaultPlantsIfEmpty();
-      const fetchedPlants = await getPlants();
+      // Seeding is staff-only (RLS) and must never block loading the trip list.
+      if (role !== 'driver') await seedDefaultPlantsIfEmpty().catch(() => {});
+      const fetchedPlants = await getPlants().catch(() => [] as (Plant & { id: string })[]);
       setTrips(fetchedTrips);
       setDrivers(fetchedDrivers);
       setVehicles(fetchedVehicles);
@@ -343,10 +352,6 @@ export default function TripsScreen({ role, pendingTripId, onPendingTripConsumed
       const unsub = subscribeToDriverTrips(user.uid, setTrips);
       return unsub;
     }
-  }, []);
-
-  useEffect(() => {
-    registerOfflineHandler('addFuelLog', async (payload) => { await addFuelLog(payload); });
   }, []);
 
   // Auto-open detail modal when navigated from Home screen
@@ -422,7 +427,8 @@ export default function TripsScreen({ role, pendingTripId, onPendingTripConsumed
         odometerEnd: form.odometerEnd.trim() ? parseFloat(form.odometerEnd) : undefined,
         departureTime: departureTime,
         arrivalTime: null,
-        status: 'Active',
+        // assigned, not yet started — the driver's "Start" sets it to 'active'
+        status: 'pending',
         time: 'Just now',
         userId: user?.uid ?? '',
         driverUserId: driverUid,
@@ -473,7 +479,7 @@ export default function TripsScreen({ role, pendingTripId, onPendingTripConsumed
         odometerEnd: f.odometerEnd.trim() ? parseFloat(f.odometerEnd) : undefined,
         departureTime: f.departureTime!,
         arrivalTime: f.arrivalTime,
-        status: f.arrivalTime ? 'Delivered' : 'Active',
+        status: editedTripStatus(selected.status, f.arrivalTime),
         driverUserId: f.driverUserId,
         driverId: f.driverId,
       });

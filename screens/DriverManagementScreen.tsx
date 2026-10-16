@@ -548,7 +548,7 @@ export default function DriverManagementScreen() {
                     </Text>
                   </View>
                 </View>
-                {!selected?.userId && (
+                {!selected?.userId && isAdmin && (
                   <TouchableOpacity
                     style={[dv.editBtn, { backgroundColor: Colors.success, marginBottom: Spacing[3] }]}
                     onPress={handleCreateLogin}

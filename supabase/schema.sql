@@ -23,7 +23,8 @@ begin
   values (
     new.id::text,
     lower(coalesce(new.email, '')),
-    'driver', -- never trust a client-supplied role in signup metadata
+    -- never trust client-supplied user_metadata.role (anyone can sign up with it)
+    'driver',
     coalesce(new.created_at, now())
   )
   on conflict (uid) do update
@@ -236,7 +237,9 @@ begin
   values (
     new.id,
     lower(coalesce(new.email, '')),
-    'driver'::user_role, -- signup metadata is client-controlled; roles are granted by an admin only
+    -- every new account starts as a driver; only an admin can promote it.
+    -- (user_metadata is client-controlled via supabase.auth.signUp, so never read the role from it)
+    'driver'::user_role,
     new.raw_user_meta_data->>'full_name',
     coalesce(new.created_at, now())
   )
@@ -666,6 +669,10 @@ begin
      and new.odometer_end >= new.odometer_start then
     new.distance_travelled_km := new.odometer_end - new.odometer_start;
   end if;
+  -- keep the legacy text column in sync so older app builds show the same figure
+  if new.distance_travelled_km is not null then
+    new.distance_travelled := new.distance_travelled_km::text;
+  end if;
   return new;
 end;
 $$;
@@ -709,8 +716,9 @@ begin
     lower(tg_op),
     'trip',
     coalesce(new.id, old.id),
-    case when tg_op in ('update', 'delete') then to_jsonb(old) else null end,
-    case when tg_op in ('insert', 'update') then to_jsonb(new) else null end
+    -- TG_OP is upper-case ('INSERT' / 'UPDATE' / 'DELETE')
+    case when tg_op in ('UPDATE', 'DELETE') then to_jsonb(old) else null end,
+    case when tg_op in ('INSERT', 'UPDATE') then to_jsonb(new) else null end
   );
   return coalesce(new, old);
 end;
@@ -728,7 +736,7 @@ security definer
 set search_path = public
 as $$
 begin
-  if tg_op = 'update' and new.role is distinct from old.role then
+  if tg_op = 'UPDATE' and new.role is distinct from old.role then
     insert into public.audit_logs (actor_id, action, entity_type, entity_id, old_value, new_value)
     values (auth.uid(), 'role_change', 'profile', new.id, jsonb_build_object('role', old.role), jsonb_build_object('role', new.role));
   end if;
@@ -1037,9 +1045,11 @@ begin
 end;
 $$;
 
--- Self-service account deletion (required by the App Store). Removes the
--- caller's auth user and profile plus personal live data; fleet history (trips,
--- the employer's driver record) is kept but unlinked from the deleted account.
+-- Self-service account deletion (required by the App Store and Google Play).
+-- Removes the caller's auth user and profile, personal live data, and their
+-- driver record (Aadhaar/PAN/photo) with its documents, as promised by the
+-- privacy policy (docs/index.html). Fleet history (trips, fuel logs) is kept
+-- but unlinked from the deleted account.
 create or replace function public.delete_my_account()
 returns void
 language plpgsql
@@ -1063,7 +1073,11 @@ begin
   delete from public.notifications where driver_user_id = v_uid;
   delete from public.driver_locations where user_id = v_uid;
   delete from public.push_tokens where user_id = v_uid;
-  update public.drivers set profile_id = null, user_id = null where profile_id = v_uid or user_id = v_uid;
+  delete from public.documents
+  where entity_type = 'driver'
+    and entity_id in (select id from public.drivers where profile_id = v_uid or user_id = v_uid);
+  -- trips.driver_id is on delete set null, so trip history survives
+  delete from public.drivers where profile_id = v_uid or user_id = v_uid;
   delete from public.profiles where id = v_uid;
   delete from auth.users where id = v_uid;
 end;
@@ -1084,9 +1098,11 @@ grant execute on function public.delete_my_account() to authenticated;
 alter table public.trips add column if not exists updated_at timestamptz not null default now();
 
 -- trips_update_own_driver lets a driver update their own trip row; this trigger
--- narrows that to the lifecycle fields (status, times, odometer, fuel) and to
--- forward status transitions, so a driver can't rewrite quantity, reassign the
--- vehicle, or reopen a completed trip.
+-- narrows that to the lifecycle fields (status, times, odometer) and to forward
+-- status transitions, so a driver can't rewrite fuel or distance figures or the
+-- quantity, reassign the vehicle, or reopen a completed trip. It must fire before
+-- trips_compute_distance (BEFORE triggers run in name order) so it sees the
+-- driver's own change rather than the distance derived from the odometer.
 create or replace function public.guard_driver_trip_update()
 returns trigger
 language plpgsql
@@ -1095,8 +1111,7 @@ as $$
 declare
   allowed text[] := array[
     'status', 'trip_status', 'departure_time', 'arrival_time', 'time',
-    'odometer_start', 'odometer_end', 'distance_travelled', 'distance_travelled_km',
-    'fuel_filled', 'fuel_filled_liters', 'updated_at'
+    'odometer_start', 'odometer_end', 'updated_at'
   ];
 begin
   -- ct.system_write is set (transaction-local) only by security definer
@@ -1107,7 +1122,7 @@ begin
     return new;
   end if;
   if (to_jsonb(new) - allowed) is distinct from (to_jsonb(old) - allowed) then
-    raise exception 'drivers can only update trip status, times, odometer and fuel' using errcode = '42501';
+    raise exception 'drivers can only update trip status, times and odometer' using errcode = '42501';
   end if;
   if old.trip_status in ('completed', 'cancelled') then
     raise exception 'trip is already closed' using errcode = '42501';
@@ -1124,7 +1139,8 @@ end;
 $$;
 
 drop trigger if exists trips_guard_driver_update on public.trips;
-create trigger trips_guard_driver_update
+drop trigger if exists trips_a_driver_guard on public.trips;
+create trigger trips_a_driver_guard
 before update on public.trips
 for each row execute function public.guard_driver_trip_update();
 
@@ -1799,3 +1815,26 @@ begin
     perform cron.schedule('ct_compliance_scan', '0 3 * * *', 'select public.scan_compliance_alerts()');         -- 08:30 IST
   end if;
 end $$;
+
+-- ============================================================================
+-- Merge reconciliation (fix/security-and-data-bugs + main)
+-- (additive/idempotent — safe to re-run)
+--
+-- Both branches hardened the same areas. The "Security hardening" section above
+-- replaces the earlier "Bug-fix migration", which was already applied to
+-- production; drop its objects so the two guards don't both run.
+-- ============================================================================
+drop trigger if exists profiles_guard_update on public.profiles;          -- → profiles_guard_privileged
+drop function if exists public.guard_profile_update();
+drop policy if exists drivers_update_own on public.drivers;               -- → save_my_driver_profile()
+drop trigger if exists drivers_guard_update on public.drivers;
+drop function if exists public.guard_driver_update();
+drop function if exists public.claim_driver_record();                     -- → claim_my_driver_record()
+drop trigger if exists trips_a_guard_driver_update on public.trips;       -- → trips_a_driver_guard
+drop function if exists public.guard_trip_driver_update();
+
+-- backfill: odometer-derived distance was never copied to the text column the app read
+update public.trips
+set distance_travelled = distance_travelled_km::text
+where distance_travelled_km is not null
+  and distance_travelled is distinct from distance_travelled_km::text;

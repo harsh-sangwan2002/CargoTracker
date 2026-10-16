@@ -165,6 +165,7 @@ describe('driverService (PII handling)', () => {
   });
 
   it("doesn't blank stored Aadhaar/PAN when a manager saves without them", async () => {
+    mockResults['drivers'] = { data: [{ id: 'd1' }], error: null };
     const { updateDriver } = require('../services/driverService');
     await updateDriver('d1', { fullName: 'Ravi', aadhaarCard: '', panCard: '' });
     const payload = opArgs(callsTo('drivers')[0], 'update')?.[0];
@@ -180,6 +181,7 @@ describe('driverService (PII handling)', () => {
   });
 
   it('uploads photos to the private bucket and resolves signed URLs', async () => {
+    mockResults['drivers'] = { data: [{ id: 'd1' }], error: null };
     const { setDriverPhoto, resolveDriverPhotoUrls } = require('../services/driverService');
     const path = await setDriverPhoto('d1', 'file:///tmp/photo.jpg');
     expect(path).toMatch(/^d1\/\d+\.jpg$/);

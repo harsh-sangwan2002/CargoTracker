@@ -21,8 +21,13 @@ import {auth} from '../supabaseConfig';
 import {getTrips, getTripsByUser, TripRecord} from '../services/tripService';
 import {getDrivers, Driver} from '../services/driverService';
 import {getVehicles, Vehicle} from '../services/vehicleService';
+import {getFuelLogsForTrips} from '../services/fuelService';
 import {
   vehicleStatsFromTrips,
+  fuelByTripFromLogs,
+  tripFuelLiters,
+  tripDistanceKm,
+  FuelByTrip,
   getVehicleStatsForRange,
   driverPerformanceFromTrips,
   buildAnalyticsCsv,
@@ -205,6 +210,7 @@ export default function AnalyticsScreen({role}: Props) {
   const user = auth.currentUser;
 
   const [allTrips, setAllTrips] = useState<(TripRecord & {id: string})[]>([]);
+  const [fuelByTrip, setFuelByTrip] = useState<FuelByTrip>(() => new Map());
   const [drivers, setDrivers] = useState<(Driver & {id: string})[]>([]);
   const [vehicles, setVehicles] = useState<(Vehicle & {id: string})[]>([]);
   const [loading, setLoading] = useState(true);
@@ -265,6 +271,9 @@ export default function AnalyticsScreen({role}: Props) {
       setAllTrips(t);
       setDrivers(d);
       setVehicles(v);
+      // Non-fatal: without logs the per-trip quick-entry fuel figure is used.
+      const logs = await getFuelLogsForTrips(t.map(trip => trip.id)).catch(() => []);
+      setFuelByTrip(fuelByTripFromLogs(logs));
     } catch (e) {
       console.error(e);
     } finally {
@@ -310,14 +319,14 @@ export default function AnalyticsScreen({role}: Props) {
   const activeTrips = filtered.filter((t) => !t.arrivalTime).length;
   const deliveredTrips = filtered.filter((t) => !!t.arrivalTime).length;
   const billable = filtered.filter((t) => t.tripStatus !== 'cancelled');
-  const totalFuel = billable.reduce((s, t) => s + (parseFloat(t.fuelFilled) || 0), 0);
-  const totalDist = billable.reduce((s, t) => s + (parseFloat(t.distanceTravelled ?? '0') || 0), 0);
+  const totalFuel = billable.reduce((s, t) => s + tripFuelLiters(t, fuelByTrip), 0);
+  const totalDist = billable.reduce((s, t) => s + tripDistanceKm(t), 0);
   const avgFuel = totalTrips > 0 ? (totalFuel / totalTrips).toFixed(1) : '0';
 
   /* ── Driver performance ───────────────────────────────────────── */
   const driverPerformance = useMemo(
-    () => driverPerformanceFromTrips(filtered, new Map(drivers.map(d => [d.id, d.fullName]))),
-    [filtered, drivers]
+    () => driverPerformanceFromTrips(filtered, new Map(drivers.map(d => [d.id, d.fullName])), fuelByTrip),
+    [filtered, drivers, fuelByTrip]
   );
 
   // Top 10 by trips; drivers sharing a name are told apart by their vehicle.
@@ -348,7 +357,7 @@ export default function AnalyticsScreen({role}: Props) {
   /* ── Per-truck distance & fuel breakdown ───────────────────────── */
   // Staff: aggregated server-side (rollup-backed for long ranges); drivers and
   // offline/fallback: computed from the trips already on the device.
-  const clientVehicleStats = useMemo(() => vehicleStatsFromTrips(filtered, vehicles), [filtered, vehicles]);
+  const clientVehicleStats = useMemo(() => vehicleStatsFromTrips(filtered, vehicles, fuelByTrip), [filtered, vehicles, fuelByTrip]);
   const [serverVehicleStats, setServerVehicleStats] = useState<VehicleStat[] | null>(null);
   useEffect(() => {
     if (role === 'driver' || loading) return;

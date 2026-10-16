@@ -7,6 +7,7 @@ import { auth } from '../supabaseConfig';
 import { getUserProfile } from '../services/userService';
 import { getMyDriverProfile } from '../services/driverService';
 import { registerForPushNotifications } from '../utils/pushNotifications';
+import { stopDriverTracking } from '../utils/driverTracking';
 import { Colors, FontSize, Shadow } from '../utils/theme';
 import DashboardScreen from './DashboardScreen';
 import DriverHomeScreen from './DriverHomeScreen';
@@ -50,10 +51,13 @@ export default function MainTabsScreen() {
   useEffect(() => {
     if (!user?.uid) { setLoadingRole(false); return; }
     const cacheKey = `ct_role_${user.uid}`;
+    let fetched = false;
     AsyncStorage.getItem(cacheKey).then(cached => {
-      if (cached) { setRole(cached as UserRole); setLoadingRole(false); }
+      // the cached role only bridges the wait; never let it overwrite a fresh one
+      if (cached && !fetched) { setRole(cached as UserRole); setLoadingRole(false); }
     }).catch(() => {});
     getUserProfile(user.uid).then(profile => {
+      fetched = true;
       if (profile?.role) {
         setRole(profile.role as UserRole);
         AsyncStorage.setItem(cacheKey, profile.role).catch(() => {});
@@ -85,6 +89,9 @@ export default function MainTabsScreen() {
       .then(profile => setProfileComplete(!!profile?.fullName?.trim()))
       .catch(() => setProfileComplete(false));
   }, [role]);
+
+  // MainTabs unmounts on sign-out: make sure no location watcher outlives the session.
+  useEffect(() => () => stopDriverTracking(), []);
 
   const visibleTabs = ALL_TABS.filter(
     tab => !tab.roles || tab.roles.includes(role)

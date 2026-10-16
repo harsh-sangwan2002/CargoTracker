@@ -366,7 +366,7 @@ describe('analytics rollup', () => {
 });
 
 describe('delete_my_account', () => {
-  it('removes the auth user and profile but keeps fleet history', async () => {
+  it('removes the auth user, profile and driver record but keeps fleet history', async () => {
     const mail = email('leaver');
     const uid = await h.createUser(mail);
     const [{ id: rowId }] = await h.owner(
@@ -377,9 +377,10 @@ describe('delete_my_account', () => {
 
     expect(await h.owner('select 1 from auth.users where id = $1', [uid])).toHaveLength(0);
     expect(await h.owner('select 1 from profiles where id = $1', [uid])).toHaveLength(0);
-    const [driver] = await h.owner('select profile_id from drivers where id = $1', [rowId]);
-    expect(driver.profile_id).toBeNull();
-    expect(await h.owner('select 1 from trips where id = $1', [trip.id])).toHaveLength(1);
+    // the driver record holds their Aadhaar/PAN, so it goes too (privacy policy)
+    expect(await h.owner('select 1 from drivers where id = $1', [rowId])).toHaveLength(0);
+    const [kept] = await h.owner('select driver_id from trips where id = $1', [trip.id]);
+    expect(kept.driver_id).toBeNull();
   });
 
   it('refuses to delete the last active admin', async () => {

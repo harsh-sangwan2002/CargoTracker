@@ -3,11 +3,16 @@ import NetInfo from '@react-native-community/netinfo';
 
 export const QUEUE_KEY = 'ct_offline_queue';
 
+// An op that keeps failing while the device is online (e.g. the trip was deleted)
+// is dropped after this many attempts so it can't block everything queued after it.
+const MAX_ATTEMPTS = 5;
+
 interface QueuedOp {
   id: string;
   type: string;
   payload: any;
   createdAt: number;
+  attempts?: number;
 }
 
 type Handler = (payload: any) => Promise<void>;
@@ -22,10 +27,9 @@ let replayingOpCreatedAt: number | null = null;
 // offline), otherwise it's now.
 export const effectiveNow = (): Date => new Date(replayingOpCreatedAt ?? Date.now());
 
-// Screens register how to replay a queued operation once connectivity returns
-// (e.g. handlers.startTrip = (payload) => tripService.startTrip(payload.tripId)).
-// Ops queued before the screen mounted (e.g. from a previous app session) are
-// replayed as soon as their handler appears, not on the next network change.
+// Registers how to replay a queued operation once connectivity returns
+// (see utils/offlineHandlers.ts). Ops queued before their handler existed (e.g.
+// from a previous app session) are replayed as soon as it is registered.
 export const registerOfflineHandler = (type: string, handler: Handler) => {
   handlers[type] = handler;
   flushOfflineQueue().catch(() => {});
@@ -56,8 +60,17 @@ export const enqueueOfflineOp = async (type: string, payload: any): Promise<void
 
 export const getPendingOfflineCount = async (): Promise<number> => (await readQueue()).length;
 
-// Replays queued ops in order, stopping at the first failure (assumed still offline)
-// so later writes don't apply out of order ahead of an earlier one that didn't.
+const isOnline = async () => {
+  try {
+    const state = await NetInfo.fetch();
+    return !!state.isConnected && state.isInternetReachable !== false;
+  } catch {
+    return false;
+  }
+};
+
+// Replays queued ops in order, stopping at the first failure while offline so
+// later writes don't apply ahead of an earlier one that didn't.
 export const flushOfflineQueue = (): Promise<void> => {
   if (currentFlush) {
     // e.g. a handler registered mid-flush: run again once this pass finishes,
@@ -78,18 +91,27 @@ const runFlush = async (): Promise<void> => {
         const op = queue[0];
         const handler = handlers[op.type];
         if (!handler) {
-          // No handler registered (e.g. app just launched, screen not mounted yet) —
-          // leave it queued rather than dropping it.
+          // No handler registered yet — leave it queued rather than dropping it.
           break;
         }
         try {
           replayingOpCreatedAt = op.createdAt;
           await handler(op.payload);
         } catch (error) {
-          if (!isPermanentFailure(error)) break;
-          // The server rejected it (e.g. trip already closed by a manager); a
-          // permanently failing op would otherwise block every op behind it.
-          console.warn(`Dropping offline ${op.type} op rejected by the server`, error);
+          if (isPermanentFailure(error)) {
+            // The server rejected it (e.g. trip already closed by a manager); a
+            // permanently failing op would otherwise block every op behind it.
+            console.warn(`Dropping offline ${op.type} op rejected by the server`, error);
+          } else {
+            if (!(await isOnline())) break;
+            // Failing while online without a server error code: retry a few times,
+            // then drop it so it can't block everything queued after it.
+            const attempts = (op.attempts ?? 0) + 1;
+            if (attempts < MAX_ATTEMPTS) {
+              await writeQueue([{ ...op, attempts }, ...queue.slice(1)]);
+              break;
+            }
+          }
         } finally {
           replayingOpCreatedAt = null;
         }
@@ -105,7 +127,9 @@ const runFlush = async (): Promise<void> => {
 // Called on sign-out so one user's unsynced writes are never replayed under the
 // next user's session on a shared device.
 export const clearOfflineQueue = async (): Promise<void> => {
-  await AsyncStorage.removeItem(QUEUE_KEY);
+  try {
+    await AsyncStorage.removeItem(QUEUE_KEY);
+  } catch {}
 };
 
 let unsubscribeNetInfo: (() => void) | null = null;

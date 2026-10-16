@@ -98,17 +98,20 @@ export const getStaffProfile = async (uid: string): Promise<StaffProfile | null>
 };
 
 export const upsertStaffProfile = async (uid: string, profile: StaffProfile) => {
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('profiles')
     .update({ full_name: profile.fullName, phone: profile.phone, address: profile.address })
-    .eq('id', uid);
+    .eq('id', uid)
+    .select('id');
   if (error) throw error;
+  // RLS answers a blocked update with 0 rows and no error.
+  if (!data?.length) throw new Error('Your profile could not be updated.');
 };
 
 // Self-service account deletion. Runs server-side (delete_my_account) because
 // RLS rightly stops users deleting rows they don't own: it removes the auth user,
-// profile, notifications, live location and push token, and unlinks (but keeps)
-// the employer's driver record and trip history.
+// profile, notifications, live location, push token and the user's own driver
+// record (Aadhaar/PAN), and keeps trip history unlinked from the account.
 export const deleteUserAccountData = async (_uid: string) => {
   const { error } = await supabase.rpc('delete_my_account');
   if (error) throw error;

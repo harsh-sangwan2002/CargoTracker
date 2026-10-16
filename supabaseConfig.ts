@@ -1,6 +1,8 @@
 import 'react-native-url-polyfill/auto';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient, Session, User } from '@supabase/supabase-js';
+import { clearAllCache } from './utils/cache';
+import { clearOfflineQueue, flushOfflineQueue } from './utils/offlineQueue';
 
 // Supabase URL and anon/publishable key are safe to ship in the client bundle —
 // they are not secrets; access control is enforced server-side via Row Level
@@ -80,38 +82,24 @@ export const createUserWithEmailAndPassword = async (email: string, password: st
   return data;
 };
 
-// Local data that belongs to the signed-in user: the API response cache (which
-// for staff holds every trip and driver), the unsynced offline write queue, and
-// the cached role. None of it may survive into the next session on this device.
-const USER_SCOPED_KEY_PREFIXES = ['ct_cache:', 'ct_offline_queue', 'ct_role_'];
-
-const clearUserScopedStorage = async () => {
-  try {
-    const keys = await AsyncStorage.getAllKeys();
-    const owned = keys.filter(k => USER_SCOPED_KEY_PREFIXES.some(prefix => k.startsWith(prefix)));
-    if (owned.length) await AsyncStorage.multiRemove(owned);
-  } catch {}
-};
-
+// Cached trips/drivers and queued offline writes belong to the signed-in user, so they
+// must not survive into the next session on this device.
 export const signOut = async () => {
+  // Replay anything done offline while this user's session is still valid.
+  await flushOfflineQueue().catch(() => {});
   try {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
   } finally {
     cachedUser = null;
-    await clearUserScopedStorage();
+    await Promise.all([clearAllCache(), clearOfflineQueue()]);
   }
-};
-
-export const reauthenticateWithPassword = async (email: string, password: string) => {
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
-  if (error) throw error;
 };
 
 // Invokes an Edge Function and surfaces its JSON `error` message. supabase-js
 // only reports "non-2xx status code" for failures; the real reason is in the
 // response body on error.context.
-export const invokeFunction = async <T = any>(name: string, body: Record<string, unknown>): Promise<T> => {
+export const invokeFunction = async <T = any>(name: string, body?: Record<string, unknown>): Promise<T> => {
   const { data, error } = await supabase.functions.invoke(name, { body });
   if (error) {
     const context = (error as any)?.context;
@@ -124,8 +112,13 @@ export const invokeFunction = async <T = any>(name: string, body: Record<string,
     }
     throw error;
   }
-  if (data?.error) throw new Error(data.error);
+  if ((data as any)?.error) throw new Error((data as any).error);
   return data as T;
+};
+
+export const reauthenticateWithPassword = async (email: string, password: string) => {
+  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) throw error;
 };
 
 // Emails a 6-digit reset code via the password-otp-send edge function. It

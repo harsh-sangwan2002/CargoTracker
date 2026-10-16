@@ -131,8 +131,15 @@ export const getDriverById = async (driverId: string): Promise<(Driver & { id: s
 };
 
 export const updateDriver = async (driverId: string, data: Partial<Driver>) => {
-  const { error } = await supabase.from('drivers').update(compactRow(toDriverRow(data))).eq('id', driverId);
+  const { data: rows, error } = await supabase
+    .from('drivers')
+    .update(compactRow(toDriverRow(data)))
+    .eq('id', driverId)
+    .select('id');
   if (error) throw error;
+  // RLS turns a disallowed update into "0 rows, no error" — surface it instead of
+  // letting the UI report a save that never happened.
+  if (!rows?.length) throw new Error('You do not have permission to update this driver.');
   clearCache(CACHE_KEY);
 };
 
