@@ -64,7 +64,12 @@
       "Bash(unzip -p CargoTracker-1.0.1-vc3.aab base/manifest/AndroidManifest.xml)",
       "Bash(grep -m3 -E \"cargotracker|^1\\\\.0\\\\.1$\")",
       "Bash(unzip -l CargoTracker-1.0.1-vc3.aab)",
-      "Bash(shasum -a 256 CargoTracker-1.0.1-vc3.aab application-2143ff56-b83a-466b-8120-27ec19b71d8a.aab)"
+      "Bash(shasum -a 256 CargoTracker-1.0.1-vc3.aab application-2143ff56-b83a-466b-8120-27ec19b71d8a.aab)",
+      "Bash(gh auth *)",
+      "Bash(git fetch *)",
+      "Bash(gh pr *)",
+      "Bash(git log *)",
+      "Bash(python3 -I -c 'import sys,urllib.parse as u; b=open\\(sys.argv[1]\\).read\\(\\); print\\(\"https://github.com/harsh-sangwan2002/CargoTracker/compare/main...fix/security-and-data-bugs?quick_pull=1&\"+u.urlencode\\({\"title\":\"Security/data-integrity fixes + Android Play Store release prep \\(v1.0.1\\)\",\"body\":b}\\)\\)' /private/tmp/claude-501/-Users-harshsangwan-Desktop-CargoTracker/2702361b-d253-4e6c-868b-79b7358490d1/scratchpad/pr-body.md)"
     ],
     "additionalDirectories": [
       "/private/tmp/claude-501/-Users-harshsangwan-Desktop-CargoTracker/6fe50e55-8c5b-4a04-8083-a0bd80a74b9a/store"
