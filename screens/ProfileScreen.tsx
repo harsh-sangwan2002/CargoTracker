@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -21,6 +22,9 @@ import { getPendingOfflineCount } from '../utils/offlineQueue';
 import { stopDriverTracking } from '../utils/driverTracking';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
 import type { UserRole } from './MainTabsScreen';
+
+// Hosted from docs/index.html via GitHub Pages; must match the URL entered in Play Console.
+const PRIVACY_POLICY_URL = 'https://harsh-sangwan2002.github.io/CargoTracker/';
 
 interface Props {
   role: UserRole;
@@ -451,6 +455,11 @@ export default function ProfileScreen({ role, profileComplete = true, onProfileS
           <TouchableOpacity style={s.actionBtn} onPress={handleLogout} activeOpacity={0.8}>
             <Text style={s.actionIcon}>🚪</Text>
             <Text style={s.actionLabel}>Sign Out</Text>
+            <Text style={s.actionArrow}>›</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.actionBtn} onPress={() => Linking.openURL(PRIVACY_POLICY_URL)} activeOpacity={0.8}>
+            <Text style={s.actionIcon}>🔒</Text>
+            <Text style={s.actionLabel}>Privacy Policy</Text>
             <Text style={s.actionArrow}>›</Text>
           </TouchableOpacity>
           <TouchableOpacity

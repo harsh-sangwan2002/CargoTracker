@@ -1,0 +1,560 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CargoTracker Privacy Policy</title>
+  <meta name="description"
+    content="Privacy policy for the CargoTracker app and the page to delete your CargoTracker account.">
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --surface: #ffffff;
+      --text: #0f172a;
+      --muted: #475569;
+      --border: #e2e8f0;
+      --accent: #2563eb;
+      --danger: #dc2626;
+      --danger-bg: #fef2f2;
+      --success: #15803d;
+      --success-bg: #f0fdf4;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0b1120;
+        --surface: #111827;
+        --text: #e5e7eb;
+        --muted: #9ca3af;
+        --border: #1f2937;
+        --accent: #60a5fa;
+        --danger: #f87171;
+        --danger-bg: #2a1215;
+        --success: #4ade80;
+        --success-bg: #0f2a1a;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 16px/1.65 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    }
+
+    main {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 32px 16px 64px;
+    }
+
+    header {
+      margin-bottom: 32px;
+    }
+
+    h1 {
+      font-size: 2rem;
+      line-height: 1.2;
+      margin: 0 0 8px;
+    }
+
+    h2 {
+      font-size: 1.25rem;
+      margin: 40px 0 8px;
+    }
+
+    h3 {
+      font-size: 1rem;
+      margin: 20px 0 4px;
+    }
+
+    p,
+    li {
+      color: var(--muted);
+    }
+
+    strong {
+      color: var(--text);
+    }
+
+    a {
+      color: var(--accent);
+    }
+
+    ul {
+      padding-left: 20px;
+    }
+
+    .meta {
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    nav {
+      margin-top: 16px;
+      font-size: 0.95rem;
+    }
+
+    nav a {
+      margin-right: 16px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.95rem;
+    }
+
+    th,
+    td {
+      text-align: left;
+      vertical-align: top;
+      padding: 10px 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    th {
+      color: var(--text);
+    }
+
+    td {
+      color: var(--muted);
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      margin-top: 16px;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 20px;
+    }
+
+    .tab {
+      flex: 1;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .tab[aria-selected="true"] {
+      border-color: var(--accent);
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    label {
+      display: block;
+      font-weight: 600;
+      margin: 12px 0 4px;
+      font-size: 0.95rem;
+    }
+
+    input[type="email"],
+    input[type="password"],
+    input[type="text"] {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg);
+      color: var(--text);
+      font: inherit;
+    }
+
+    .check {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      font-weight: 400;
+      color: var(--muted);
+      margin-top: 16px;
+    }
+
+    .check input {
+      margin-top: 5px;
+    }
+
+    button.primary,
+    button.danger {
+      margin-top: 16px;
+      width: 100%;
+      padding: 12px;
+      border: 0;
+      border-radius: 8px;
+      font: inherit;
+      font-weight: 600;
+      color: #fff;
+      cursor: pointer;
+    }
+
+    button.primary {
+      background: var(--accent);
+    }
+
+    button.danger {
+      background: var(--danger);
+    }
+
+    button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    .status {
+      margin-top: 16px;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 0.95rem;
+    }
+
+    .status.error {
+      background: var(--danger-bg);
+      color: var(--danger);
+    }
+
+    .status.ok {
+      background: var(--success-bg);
+      color: var(--success);
+    }
+  </style>
+</head>
+
+<body>
+  <main>
+    <header>
+      <h1>CargoTracker Privacy Policy</h1>
+      <p class="meta">Effective date: 16 October 2026</p>
+      <nav>
+        <a href="#data">Data we collect</a>
+        <a href="#sharing">Sharing</a>
+        <a href="#retention">Retention</a>
+        <a href="#delete-account">Delete your account</a>
+      </nav>
+    </header>
+
+    <p>
+      CargoTracker ("the app", "we", "us") is a fleet and cargo management app used by transport companies,
+      their managers and their drivers to record trips, track vehicles and log fuel. This policy explains what
+      data the app collects, why, who it is shared with, and how you can delete your account.
+    </p>
+    <p>
+      The app is intended for use by a company's staff. Your employer (the company that added you to CargoTracker)
+      decides how the trip and vehicle records it keeps in the app are used.
+    </p>
+
+    <h2 id="data">Data we collect</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Data</th>
+            <th>Why we collect it</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Account details</strong>: email address, password (stored hashed), role (driver, manager or
+              admin)</td>
+            <td>Signing in and controlling what each user can see and do.</td>
+          </tr>
+          <tr>
+            <td><strong>Profile details</strong>: full name, phone number, address, age</td>
+            <td>Identifying staff and drivers to their company.</td>
+          </tr>
+          <tr>
+            <td><strong>Driver identity documents</strong>: Aadhaar number, PAN number, vehicle owned, profile photo
+            </td>
+            <td>Driver verification, which the company records when it adds a driver.</td>
+          </tr>
+          <tr>
+            <td><strong>Precise location</strong> (GPS)</td>
+            <td>Showing a driver's live position to their company's managers while trip tracking is turned on. Location
+              is only collected while the app is open and tracking is on.</td>
+          </tr>
+          <tr>
+            <td><strong>Trip and fuel records</strong>: truck, route, cargo, quantity, times, distance, fuel quantity
+              and cost, odometer readings, fuel receipt photos</td>
+            <td>Operating the fleet and keeping the company's trip and fuel history.</td>
+          </tr>
+          <tr>
+            <td><strong>Photos</strong> from the camera or gallery</td>
+            <td>Only when you choose to attach a driver photo or receipt.</td>
+          </tr>
+          <tr>
+            <td><strong>Device push token</strong></td>
+            <td>Sending trip and status notifications to your device.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p>We do not collect contacts, messages, call logs, browsing history or advertising IDs, and the app shows no ads.
+    </p>
+
+    <h2>How we use your data</h2>
+    <ul>
+      <li>To provide the app's features: sign-in, trips, live tracking, fuel logs and notifications.</li>
+      <li>To send one-time codes by email for password resets and account deletion.</li>
+      <li>To keep the service secure, for example rate-limiting sign-in codes and keeping an audit log of changes to
+        records.</li>
+    </ul>
+    <p>We do not sell your personal data or use it for advertising or profiling.</p>
+
+    <h2 id="sharing">Who we share data with</h2>
+    <p>Your data is visible to authorised managers and admins of the company you work with. We also use these service
+      providers to run the app, and they process data only on our behalf:</p>
+    <ul>
+      <li><strong>Supabase</strong>: database, sign-in, file storage and server functions. All app data is stored here.
+      </li>
+      <li><strong>Resend</strong>: sends sign-in, password reset and account deletion emails (your email address and the
+        code).</li>
+      <li><strong>Expo and Google Firebase Cloud Messaging</strong>: deliver push notifications (your device push token
+        and the notification text).</li>
+      <li><strong>Google Maps</strong>: displays maps in the app.</li>
+    </ul>
+    <p>We may also disclose data if required by law.</p>
+
+    <h2>Security</h2>
+    <p>
+      All data is encrypted in transit using HTTPS. Access to records is restricted on the server, so each user
+      can only access the data their role permits. Passwords and one-time codes are never stored in plain text.
+    </p>
+
+    <h2 id="retention">How long we keep data</h2>
+    <ul>
+      <li>Account, profile and driver identity data are kept until you delete your account or your company removes you.
+      </li>
+      <li>Your last known location is replaced each time a new one is recorded, and is deleted with your account.</li>
+      <li>Password reset codes expire after 10 minutes. Other one-time codes expire shortly after they are sent and can
+        be used only once.</li>
+      <li>
+        Trip, fuel and audit records belong to your company and are kept after your account is deleted, so that the
+        company keeps its operating history. Your link to these records is removed, but a driver name typed into a
+        trip record may remain part of that record.
+      </li>
+    </ul>
+
+    <h2>Your choices and rights</h2>
+    <ul>
+      <li>You can view and edit your profile details in the app on the <strong>Profile</strong> screen.</li>
+      <li>You can stop location sharing at any time by turning off trip tracking, or by removing the location permission
+        in your device settings.</li>
+      <li>You can delete your account in the app (<strong>Profile → Delete Account</strong>) or on this page, below.
+      </li>
+      <li>For any other request about your data, contact us using the details at the end of this policy.</li>
+    </ul>
+
+    <h2>Children</h2>
+    <p>CargoTracker is a workplace app and is not intended for anyone under 18. We do not knowingly collect data from
+      children.</p>
+
+    <h2>Changes to this policy</h2>
+    <p>If we change this policy, we will update the effective date at the top of this page.</p>
+
+    <h2 id="delete-account">Delete your CargoTracker account</h2>
+    <p>Deleting your account permanently removes:</p>
+    <ul>
+      <li>your sign-in account and profile (name, phone, address)</li>
+      <li>your driver record (Aadhaar, PAN, photo, vehicle)</li>
+      <li>your location data, notifications and device push tokens</li>
+    </ul>
+    <p>
+      Your company's trip and fuel records are <strong>kept</strong>, with your account removed from them (see
+      <a href="#retention">How long we keep data</a>). Deletion happens immediately and cannot be undone.
+    </p>
+
+    <div class="card">
+      <div class="tabs" role="tablist">
+        <button class="tab" role="tab" id="tab-password" aria-selected="true" aria-controls="panel-password">Use
+          password</button>
+        <button class="tab" role="tab" id="tab-otp" aria-selected="false" aria-controls="panel-otp">Email me a
+          code</button>
+      </div>
+
+      <form id="panel-password" role="tabpanel" aria-labelledby="tab-password">
+        <label for="pw-email">Email</label>
+        <input id="pw-email" type="email" autocomplete="email" required>
+        <label for="pw-password">Password</label>
+        <input id="pw-password" type="password" autocomplete="current-password" required>
+        <label class="check"><input type="checkbox" class="confirm" required> I understand that my account will be
+          permanently deleted.</label>
+        <button class="danger" type="submit">Delete my account</button>
+      </form>
+
+      <div id="panel-otp" role="tabpanel" aria-labelledby="tab-otp" class="hidden">
+        <form id="otp-send">
+          <label for="otp-email">Email</label>
+          <input id="otp-email" type="email" autocomplete="email" required>
+          <button class="primary" type="submit">Send code</button>
+        </form>
+        <form id="otp-verify" class="hidden">
+          <p>We sent a 6-digit code to <strong id="otp-sent-to"></strong>. It expires shortly.</p>
+          <label for="otp-code">Code</label>
+          <input id="otp-code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}"
+            maxlength="6" required>
+          <label class="check"><input type="checkbox" class="confirm" required> I understand that my account will be
+            permanently deleted.</label>
+          <button class="danger" type="submit">Delete my account</button>
+        </form>
+      </div>
+
+      <div id="status" class="status hidden" role="status" aria-live="polite"></div>
+    </div>
+
+    <h2 id="contact">Contact</h2>
+    <p>
+      Questions about this policy or your data: <a href="mailto:hsangwan2002@gmail.com">hsangwan2002@gmail.com</a>
+    </p>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+  <script>
+    // Public (anon) key only, the same one shipped in the app. Never put the service-role key here.
+    const SUPABASE_URL = 'https://jlagdydxwxvjyyxxqykm.supabase.co';
+    const SUPABASE_ANON_KEY = 'sb_publishable_Cofh-Ejm0KSxrMSVqi7dWg_9dfA33gZ';
+
+    const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    });
+
+    const $ = (id) => document.getElementById(id);
+    const statusEl = $('status');
+
+    function showStatus(message, kind) {
+      statusEl.textContent = message;
+      statusEl.className = 'status ' + kind;
+    }
+    function clearStatus() {
+      statusEl.className = 'status hidden';
+    }
+    function setBusy(form, busy, label) {
+      const btn = form.querySelector('button[type="submit"]');
+      if (!btn.dataset.label) btn.dataset.label = btn.textContent;
+      btn.disabled = busy;
+      btn.textContent = busy ? label : btn.dataset.label;
+    }
+
+    // Tabs
+    const tabs = [
+      { tab: $('tab-password'), panel: $('panel-password') },
+      { tab: $('tab-otp'), panel: $('panel-otp') },
+    ];
+    tabs.forEach(({ tab }) => tab.addEventListener('click', () => {
+      tabs.forEach((t) => {
+        const active = t.tab === tab;
+        t.tab.setAttribute('aria-selected', String(active));
+        t.panel.classList.toggle('hidden', !active);
+      });
+      clearStatus();
+    }));
+
+    // supabase-js only says "non-2xx status code" for function errors; the real message is in the body.
+    async function deleteSignedInAccount() {
+      const { data, error } = await client.functions.invoke('delete-account');
+      if (error) {
+        const body = await error.context?.json?.().catch(() => null);
+        throw new Error(body?.error || 'Could not delete the account. Please try again later.');
+      }
+      if (data?.error) throw new Error(data.error);
+      await client.auth.signOut().catch(() => { });
+    }
+
+    function onDeleted() {
+      document.querySelectorAll('.card form, .tabs').forEach((el) => el.classList.add('hidden'));
+      showStatus('Your CargoTracker account has been permanently deleted. You can now uninstall the app.', 'ok');
+    }
+
+    // Option 1: email + password
+    $('panel-password').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const form = e.currentTarget;
+      clearStatus();
+      setBusy(form, true, 'Deleting…');
+      try {
+        const { error } = await client.auth.signInWithPassword({
+          email: $('pw-email').value.trim(),
+          password: $('pw-password').value,
+        });
+        if (error) throw new Error('Incorrect email or password.');
+        await deleteSignedInAccount();
+        onDeleted();
+      } catch (err) {
+        showStatus(err.message, 'error');
+      } finally {
+        setBusy(form, false);
+      }
+    });
+
+    // Option 2: one-time code sent by email
+    let otpEmail = '';
+    $('otp-send').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const form = e.currentTarget;
+      clearStatus();
+      setBusy(form, true, 'Sending…');
+      otpEmail = $('otp-email').value.trim();
+      try {
+        // shouldCreateUser: false so this page can never create new accounts.
+        const { error } = await client.auth.signInWithOtp({
+          email: otpEmail,
+          options: { shouldCreateUser: false },
+        });
+        // Show the same message whether or not the email is registered.
+        if (error && error.status === 429) throw new Error('Too many requests. Please wait a minute and try again.');
+        $('otp-sent-to').textContent = otpEmail;
+        form.classList.add('hidden');
+        $('otp-verify').classList.remove('hidden');
+        $('otp-code').focus();
+      } catch (err) {
+        showStatus(err.message, 'error');
+      } finally {
+        setBusy(form, false);
+      }
+    });
+
+    $('otp-verify').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const form = e.currentTarget;
+      clearStatus();
+      setBusy(form, true, 'Deleting…');
+      try {
+        const { error } = await client.auth.verifyOtp({
+          email: otpEmail,
+          token: $('otp-code').value.trim(),
+          type: 'email',
+        });
+        if (error) throw new Error('That code is incorrect or has expired. Request a new one and try again.');
+        await deleteSignedInAccount();
+        onDeleted();
+      } catch (err) {
+        showStatus(err.message, 'error');
+      } finally {
+        setBusy(form, false);
+      }
+    });
+  </script>
+</body>
+
+</html>
