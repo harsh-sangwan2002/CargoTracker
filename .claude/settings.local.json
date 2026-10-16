@@ -49,7 +49,22 @@
       "Bash(curl -s -X POST https://jlagdydxwxvjyyxxqykm.supabase.co/functions/v1/delete-account -H 'apikey: sb_publishable_Cofh-Ejm0KSxrMSVqi7dWg_9dfA33gZ' -w '  [HTTP %{http_code}]\\\\n')",
       "Bash(curl -s -X POST https://jlagdydxwxvjyyxxqykm.supabase.co/functions/v1/create-driver-user -H 'apikey: sb_publishable_Cofh-Ejm0KSxrMSVqi7dWg_9dfA33gZ' -H 'Content-Type: application/json' -d '{}' -w '  [HTTP %{http_code}]\\\\n')",
       "Bash(npx -y eas-cli@latest build --platform all --profile production --non-interactive --no-wait)",
-      "Bash(npx eas-cli@latest submit --platform ios --profile production --id edfc53aa-a500-4a1b-9ca5-257d174dd8fe --non-interactive --wait)"
+      "Bash(npx eas-cli@latest submit --platform ios --profile production --id edfc53aa-a500-4a1b-9ca5-257d174dd8fe --non-interactive --wait)",
+      "Bash(git push *)",
+      "Bash(brew --version)",
+      "Read(//Users/harshsangwan/.gradle/**)",
+      "Bash(brew install *)",
+      "Bash(/opt/homebrew/opt/openjdk@17/bin/java -version)",
+      "Bash(./gradlew --version)",
+      "Bash(./gradlew help *)",
+      "Bash(./gradlew --stop)",
+      "Bash(npx -y eas-cli@latest build --platform android --profile production --non-interactive --no-wait)",
+      "Read(//Users/harshsangwan/Downloads/**)",
+      "Bash(curl -sSL -o CargoTracker-1.0.1-vc3.aab \"https://expo.dev/artifacts/eas/MZmPgoLWuI-5UyrA-Xa4kQ7YRzEycAh8nE77m5hj-ic.aab\")",
+      "Bash(unzip -p CargoTracker-1.0.1-vc3.aab base/manifest/AndroidManifest.xml)",
+      "Bash(grep -m3 -E \"cargotracker|^1\\\\.0\\\\.1$\")",
+      "Bash(unzip -l CargoTracker-1.0.1-vc3.aab)",
+      "Bash(shasum -a 256 CargoTracker-1.0.1-vc3.aab application-2143ff56-b83a-466b-8120-27ec19b71d8a.aab)"
     ],
     "additionalDirectories": [
       "/private/tmp/claude-501/-Users-harshsangwan-Desktop-CargoTracker/6fe50e55-8c5b-4a04-8083-a0bd80a74b9a/store"

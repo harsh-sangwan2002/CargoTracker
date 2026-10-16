@@ -10,7 +10,7 @@
       "buildNumber": "2"
     },
     "android": {
-      "package": "com.harsh.cargotracker",
+      "package": "com.harshsangwan.cargotracker",
       "permissions": [
         "CAMERA",
         "ACCESS_FINE_LOCATION",
