@@ -42,20 +42,29 @@ export default function RegisterScreen() {
       if (!cred.user?.id) throw new Error('Account created but user session was not returned.');
       // The profile (role: driver) is created by the database trigger, and the driver
       // record is created/linked by claim_driver_record() on first sign-in (MainTabsScreen).
-      Alert.alert('Account created', 'You have been registered as a driver. An admin can update your role if needed.');
+      if (cred.session) {
+        Alert.alert('Account created', 'You have been registered as a driver. An admin can update your role if needed.');
+      } else {
+        // Email confirmation is on: no session until the link in the email is opened.
+        Alert.alert(
+          'Confirm your email',
+          `We sent a confirmation link to ${email.trim()}. Open it, then sign in.`,
+          [{ text: 'OK', onPress: () => navigation.navigate('Login') }],
+        );
+      }
     } catch (err: any) {
+      const rateLimited = 'Too many sign-up attempts right now. Please try again in a few minutes.';
       const map: Record<string, string> = {
         'user_already_exists': 'This email is already registered.',
         'email_address_invalid': 'Please enter a valid email address.',
         'weak_password': 'Password must be at least 6 characters.',
-        'over_email_send_rate_limit': 'Supabase email limit reached. Disable email confirmation for development or configure custom SMTP in Supabase Auth settings.',
+        'over_email_send_rate_limit': rateLimited,
+        'over_request_rate_limit': rateLimited,
       };
       const message = String(err.message ?? '').toLowerCase();
       const friendly =
         map[err.code] ??
-        (message.includes('email') && message.includes('rate limit')
-          ? 'Supabase email limit reached. Disable email confirmation for development or configure custom SMTP in Supabase Auth settings.'
-          : err.message);
+        (message.includes('rate limit') ? rateLimited : err.message);
       Alert.alert('Registration Failed', friendly ?? 'Something went wrong.');
     } finally {
       setLoading(false);
