@@ -1,12 +1,22 @@
 // Deploy: supabase functions deploy password-otp-send
 // Secrets required (supabase secrets set):
-//   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, RESEND_API_KEY, RESEND_FROM_EMAIL
+//   GMAIL_USER (the Gmail address), GMAIL_APP_PASSWORD (a Google App Password, not the account password)
+// SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are provided automatically.
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+import nodemailer from 'npm:nodemailer@6.9.16';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')!;
-const RESEND_FROM_EMAIL = Deno.env.get('RESEND_FROM_EMAIL')!;
+const GMAIL_USER = Deno.env.get('GMAIL_USER')!;
+const GMAIL_APP_PASSWORD = Deno.env.get('GMAIL_APP_PASSWORD')!;
+
+// Port 465 (implicit TLS): Supabase Edge Functions block outbound 25 and 587.
+const mailer = nodemailer.createTransport({
+  host: 'smtp.gmail.com',
+  port: 465,
+  secure: true,
+  auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD },
+});
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -28,41 +38,30 @@ async function hashOtp(otp: string): Promise<string> {
     .join('');
 }
 
-async function sendResendEmail(to: string, otp: string): Promise<void> {
-  const res = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${RESEND_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from: `CargoTracker <${RESEND_FROM_EMAIL}>`,
-      to: [to],
-      subject: 'Your Password Reset Code - CargoTracker',
-      html: `
-        <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;">
-          <h2 style="color:#1e293b;margin-bottom:8px;">Password Reset</h2>
-          <p style="color:#475569;margin-bottom:24px;">
-            Enter this code in the CargoTracker app to reset your password.
-            It expires in <strong>10 minutes</strong>.
-          </p>
-          <div style="background:#f1f5f9;border-radius:12px;padding:24px;text-align:center;margin-bottom:24px;">
-            <span style="font-size:48px;font-weight:800;letter-spacing:16px;color:#0f172a;">
-              ${otp}
-            </span>
-          </div>
-          <p style="color:#94a3b8;font-size:13px;">
-            If you didn't request a password reset, you can safely ignore this email.
-          </p>
+async function sendOtpEmail(to: string, otp: string): Promise<void> {
+  // Gmail only sends as the authenticated account (or a verified alias of it).
+  await mailer.sendMail({
+    from: `CargoTracker <${GMAIL_USER}>`,
+    to,
+    subject: 'Your Password Reset Code - CargoTracker',
+    html: `
+      <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;">
+        <h2 style="color:#1e293b;margin-bottom:8px;">Password Reset</h2>
+        <p style="color:#475569;margin-bottom:24px;">
+          Enter this code in the CargoTracker app to reset your password.
+          It expires in <strong>10 minutes</strong>.
+        </p>
+        <div style="background:#f1f5f9;border-radius:12px;padding:24px;text-align:center;margin-bottom:24px;">
+          <span style="font-size:48px;font-weight:800;letter-spacing:16px;color:#0f172a;">
+            ${otp}
+          </span>
         </div>
-      `,
-    }),
+        <p style="color:#94a3b8;font-size:13px;">
+          If you didn't request a password reset, you can safely ignore this email.
+        </p>
+      </div>
+    `,
   });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Resend ${res.status}: ${text}`);
-  }
 }
 
 Deno.serve(async (req) => {
@@ -135,7 +134,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    await sendResendEmail(email, otp);
+    await sendOtpEmail(email, otp);
   } catch (e) {
     return new Response(
       JSON.stringify({ error: `Failed to send email: ${(e as Error).message}` }),
