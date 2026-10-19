@@ -676,7 +676,7 @@ export default function TripsScreen({ role, pendingTripId, onPendingTripConsumed
                 <Text style={s.footerEndText}>You've reached the last trip</Text>
                 <View style={s.footerEndLine} />
               </View>
-            ) : null
+            ) : undefined
           }
           renderItem={({ item }) => {
             const delivered = !!item.arrivalTime;

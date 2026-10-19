@@ -489,7 +489,7 @@ export default function ProfileScreen({ role, profileComplete = true, onProfileS
       </ScrollView>
 
       {/* Change Password Modal */}
-      <Modal visible={changePwModal} transparent animationType="fade" onRequestClose={() => !changingPw && setChangePwModal(false)}>
+      <Modal visible={changePwModal} transparent animationType="fade" onRequestClose={() => { if (!changingPw) setChangePwModal(false); }}>
         <KeyboardAvoidingView style={s.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <Pressable style={s.modalOverlay} onPress={() => !changingPw && setChangePwModal(false)}>
             <View style={s.modalCard} onStartShouldSetResponder={() => true}>
@@ -525,7 +525,7 @@ export default function ProfileScreen({ role, profileComplete = true, onProfileS
       </Modal>
 
       {/* Delete App Data Modal */}
-      <Modal visible={deleteModal} transparent animationType="fade" onRequestClose={() => !deleting && setDeleteModal(false)}>
+      <Modal visible={deleteModal} transparent animationType="fade" onRequestClose={() => { if (!deleting) setDeleteModal(false); }}>
         <KeyboardAvoidingView style={s.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <Pressable style={s.modalOverlay} onPress={() => !deleting && setDeleteModal(false)}>
             <View style={s.modalCard} onStartShouldSetResponder={() => true}>

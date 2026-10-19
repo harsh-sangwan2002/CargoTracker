@@ -5,6 +5,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   FlatList,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import MapView, { Marker, Callout } from 'react-native-maps';
@@ -12,6 +13,10 @@ import { useNavigation } from '@react-navigation/native';
 import { subscribeToActiveLocations, DriverLocation } from '../services/locationService';
 import { getDrivers, Driver } from '../services/driverService';
 import { Colors, FontSize, Radius, Shadow, Spacing } from '../utils/theme';
+
+// Google Maps on Android crashes the app if no API key is in the manifest, so
+// without one we show the driver list only. The key is injected by app.config.js.
+const mapAvailable = Platform.OS !== 'android' || !!process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
 
 interface DriverItem {
   id: string;
@@ -115,6 +120,12 @@ export default function LiveMapScreen() {
       ) : (
         <View style={{ flex: 1 }}>
           {/* Map */}
+          {!mapAvailable ? (
+            <View style={s.centerBox}>
+              <Text style={s.emptyIcon}>🗺️</Text>
+              <Text style={s.emptyText}>Map view is unavailable. Live driver status is shown below.</Text>
+            </View>
+          ) : (
           <MapView
             ref={mapRef}
             style={{ flex: 1 }}
@@ -142,6 +153,7 @@ export default function LiveMapScreen() {
               </Marker>
             ))}
           </MapView>
+          )}
 
           {/* Offline toast */}
           {offlineToast && (

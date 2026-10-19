@@ -1,4 +1,4 @@
-package com.harshsangwan.cargotracker
+package com.harsh.cargotracker
 
 import android.os.Build
 import android.os.Bundle

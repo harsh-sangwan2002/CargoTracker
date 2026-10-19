@@ -1,15 +1,15 @@
 # Short description
-Manage trips, drivers, vehicles and live GPS tracking for your truck fleet.
+Manage trips, drivers, vehicles, fuel and documents for your truck fleet.
 
 # Full description
-CargoTracker helps transport businesses run their truck fleet from one app. Plan and assign trips, track drivers live on a map, keep vehicle papers up to date, and see how your fleet is doing.
+CargoTracker helps transport businesses run their truck fleet from one app. Plan and assign trips, see which drivers are on the road, keep vehicle papers up to date, and see how your fleet is doing.
 
 Built for three roles: admins, managers and drivers. Each person sees only what they need.
 
 FOR MANAGERS AND ADMINS
 • Dashboard: see active, completed and pending trips at a glance, with your most recent trips
 • Trip management: create, edit and assign trips with dates, drivers, vehicles and plants. Search and filter trips by status
-• Live map: see where active drivers are in real time
+• Live driver status: see which drivers are sharing their location right now, their current trip and when they were last seen
 • Driver management: add drivers with photos and profile details, and link them to their accounts
 • Vehicle management: keep a record of every vehicle, with a service log for each one
 • Fuel and maintenance: log fuel fill-ups, services, costs and odometer readings
