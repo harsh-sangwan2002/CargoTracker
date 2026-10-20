@@ -1,3 +1,4 @@
+import type { ComponentType } from 'react';
 import * as Sentry from '@sentry/react-native';
 
 // Crash + performance monitoring (HLD §7). Disabled unless a DSN is provided at
@@ -35,4 +36,6 @@ export const setMonitoringUser = (userId: string | null) => {
   Sentry.setUser(userId ? { id: userId } : null);
 };
 
-export const wrapRoot = Sentry.wrap;
+// Sentry.wrap warns at startup when Sentry.init never ran, so only wrap with a DSN.
+export const wrapRoot = <P extends Record<string, any>>(Root: ComponentType<P>) =>
+  dsn ? Sentry.wrap(Root) : Root;
